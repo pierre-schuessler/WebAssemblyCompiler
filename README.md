@@ -112,7 +112,7 @@ end
 
 `if` pops the top of the stack. If the value is **non-zero**, the true branch executes; if it is **zero**, the false branch executes. The `else` clause is optional. The type declares what value (if any) the block leaves on the stack when it exits — use `empty` if neither branch produces a value.
 
-> **Important:** `if` checks for zero vs. non-zero — not positive vs. non-positive. A negative number is non-zero and therefore takes the true branch. To compare values properly you need a comparison instruction that produces a `1` or `0` (not yet supported — see [Limitations](#limitations)).
+> **Important:** `if` checks for zero vs. non-zero — not positive vs. non-positive. A negative number is non-zero and therefore takes the true branch. To compare values properly you need a comparison instruction that produces a `1` or `0` (not yet supported — see [Future features](#future-features)).
 
 ```
 ; push a condition (non-zero = true, zero = false)
