@@ -128,6 +128,17 @@
     
     <script>
 
+        function encodeULEB128(value) {
+            const bytes = [];
+            do {
+                let byte = value & 0x7F;
+                value >>>= 7;
+                if (value !== 0) byte |= 0x80;
+                bytes.push(byte);
+            } while (value !== 0);
+            return bytes;
+        }
+
         function encodeWasmInstruction(words) {
             // Mapping of WASM opcodes for different types
             // Take type from second word if exists valid type
@@ -163,18 +174,18 @@
             switch(words[0]) {
                 case "get":
                     bytes.push(opcodes.get);
-                    bytes.push(Number(words[1]));
+                    bytes.push(...encodeULEB128(Number(words[1])));
                     break;
                 case "const":
                     bytes.push(opcodes.const[type]);
-                    bytes.push(Number(words[1]));
+                    bytes.push(...encodeULEB128(Number(words[1])));
                     break;
                 case "drop":
                     bytes.push(opcodes.drop);
                     break;
                 case "call":
                     bytes.push(opcodes.call);
-                    bytes.push(Number(words[1]));
+                    bytes.push(...encodeULEB128(Number(words[1])));
                     break;
                 case "if":
                     bytes.push(opcodes.if);
@@ -294,7 +305,6 @@
                     }
                     types.push({"inputs": inputs, "outputs": outputs});
                     imports.push({"module": moduleName, "name": funcName, "typeIndex": types.length - 1});
-                    //functions.push(types.length - 1); // function uses the last type
                     console.log(imports)
 
                 }
@@ -322,7 +332,7 @@
                 typesSectionLength += t.outputs.length; // actual output types
             });
 
-            bytes.push(typesSectionLength); // section length
+            bytes.push(...encodeULEB128(typesSectionLength)); // section length
             bytes.push(types.length); // number of types
             types.forEach(t => {
                 bytes.push(0x60); // func type
@@ -332,7 +342,7 @@
                 t.outputs.forEach(r => bytes.push(r)); // result types
             });
 
-            // import SECTION
+            // IMPORT SECTION
             bytes.push(0x02); // section id
             // calculate length
             let importsSectionLength = 1; // 1 byte for imports.length
@@ -344,7 +354,7 @@
                 importsSectionLength += 1; // import kind (0x00)
                 importsSectionLength += 1; // type index
             });
-            bytes.push(importsSectionLength); // section length
+            bytes.push(...encodeULEB128(importsSectionLength)); // section length
             bytes.push(imports.length); // number of imports
             imports.forEach(imp => {
                 bytes.push(imp.module.length); // module name length
@@ -356,61 +366,63 @@
                     bytes.push(imp.name.charCodeAt(j)); // func name chars
                 }
                 bytes.push(0x00); // import kind: function
-                bytes.push(imp.typeIndex); // type index
+                bytes.push(...encodeULEB128(imp.typeIndex)); // type index
             });
             
             
-            // FUNCTION SECTION: Declare 1 function using type 0
+            // FUNCTION SECTION
             bytes.push(0x03); // section id
-            bytes.push(1 + functions.length); // section length (TODO)
-            bytes.push(functions.length); // 1 function
-            functions.forEach(f => bytes.push(f)); // function type index
+            bytes.push(...encodeULEB128(1 + functions.length)); // section length
+            bytes.push(functions.length); // number of functions
+            functions.forEach(f => bytes.push(...encodeULEB128(f))); // function type indices
+
             if (exports.length != 0){
-            // EXPORT SECTION
-            bytes.push(0x07); // section id
+                // EXPORT SECTION
+                bytes.push(0x07); // section id
 
-            // Calculate length: 1 byte for count + each export entry
-            let exportsSectionLength = 1; // 1 byte for exports.length
-            exports.forEach((exp, idx) => {
-                exportsSectionLength += 1; // name length byte
-                exportsSectionLength += exp.name.length; // name characters
-                exportsSectionLength += 1; // export kind (0x00)
-                exportsSectionLength += 1; // function index
-            });
+                // Calculate length: 1 byte for count + each export entry
+                let exportsSectionLength = 1; // 1 byte for exports.length
+                exports.forEach((exp, idx) => {
+                    exportsSectionLength += 1; // name length byte
+                    exportsSectionLength += exp.name.length; // name characters
+                    exportsSectionLength += 1; // export kind (0x00)
+                    exportsSectionLength += 1; // function index
+                });
 
-            bytes.push(exportsSectionLength); // section length
-            bytes.push(exports.length); // number of exports
-            exports.forEach((exp, idx) => {
-                bytes.push(exp.name.length); // name length
-                for (let j = 0; j < exp.name.length; j++) {
-                    bytes.push(exp.name.charCodeAt(j)); // name chars
-                }
-                bytes.push(0x00); // export kind: function
-                bytes.push(idx + imports.length); // function index + amount of imported functions
-            });
-        }
+                bytes.push(...encodeULEB128(exportsSectionLength)); // section length
+                bytes.push(exports.length); // number of exports
+                exports.forEach((exp, idx) => {
+                    bytes.push(exp.name.length); // name length
+                    for (let j = 0; j < exp.name.length; j++) {
+                        bytes.push(exp.name.charCodeAt(j)); // name chars
+                    }
+                    bytes.push(0x00); // export kind: function
+                    bytes.push(...encodeULEB128(idx + imports.length)); // function index
+                });
+            }
             
             
             // CODE SECTION
             bytes.push(0x0A); // section id
 
             // Calculate length: 1 byte for count + each function body
-            let codesSectionLength = 1; // 1 byte for codes.length
-            codes.forEach(code => {
-                codesSectionLength += 1; // body size byte
-                codesSectionLength += 1; // local decl count (0x00)
-                codesSectionLength += code.length; // actual instructions
-                codesSectionLength += 1; // end (0x0B)
+            // Body sizes can now be multi-byte due to LEB-128, so we encode each body
+            // first and measure, rather than calculating in advance
+            const encodedBodies = codes.map(code => {
+                const body = [];
+                body.push(0x00); // local decl count
+                code.forEach(op => body.push(op)); // function body
+                body.push(0x0B); // end
+                const sizeBytes = encodeULEB128(body.length);
+                return [...sizeBytes, ...body];
             });
 
-            bytes.push(codesSectionLength); // section length
+            let codesSectionLength = 1; // 1 byte for codes.length
+            encodedBodies.forEach(b => codesSectionLength += b.length);
+
+            bytes.push(...encodeULEB128(codesSectionLength)); // section length
             bytes.push(codes.length); // number of functions
-            codes.forEach(code => {
-                bytes.push(code.length + 2); // body size (code + local decl + end)
-                bytes.push(0x00); // local decl count
-                code.forEach(op => bytes.push(op)); // function body
-                bytes.push(0x0B); // end
-            });
+            encodedBodies.forEach(b => b.forEach(byte => bytes.push(byte)));
 
             console.log(bytes);
             // Convert to Uint8Array
@@ -448,12 +460,12 @@
                 
                 // Create and instantiate the module
                 const module = await WebAssembly.compile(binary);
-                const instance = await WebAssembly.instantiate(module,{
-        env: {
-            pow: (x, y) => x ** y, // imported function: x^y
-            log: (x) => { console.log("Log from WASM:", x); return x; }
-        }
-    });
+                const instance = await WebAssembly.instantiate(module, {
+                    env: {
+                        pow: (x, y) => x ** y,
+                        log: (x) => { console.log("Log from WASM:", x); return x; }
+                    }
+                });
                 
                 // Get exported functions
                 const exports = Object.keys(instance.exports);
@@ -461,15 +473,11 @@
                 let resultHTML = '<div class="result"><p class="success">✓ Module compiled and instantiated successfully!</p>';
                 resultHTML += '<p><strong>Exported functions:</strong> ' + exports.join(', ') + '</p>';
                 
-                // Try to call the first exported function if it exists and looks callable
-
-                // try all functions
                 for (const funcName of exports) {
                     const func = instance.exports[funcName];
                     
                     if (typeof func === 'function') {
                         try {
-                            // Try calling with sample arguments (adjust as needed)
                             const result = func(5, 3);
                             resultHTML += `<p><strong>Test call ${funcName}(5, 3):</strong> ${result}</p>`;
                         } catch (e) {
@@ -477,7 +485,6 @@
                         }
                     }
                 }
-                
                 
                 resultHTML += '</div>';
                 
