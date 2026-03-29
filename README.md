@@ -10,6 +10,8 @@ The assembler reads the source code line by line. Each line is either a **direct
 
 Functions are defined implicitly: every `export` line opens a new function, and all instruction lines that follow belong to it until the next `export` (or end of file). `import` lines must come before any `export`.
 
+All further documentation can be found in the /docs/ folder.
+
 ---
 
 ## Future features
