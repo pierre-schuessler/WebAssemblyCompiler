@@ -24,7 +24,6 @@
         html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; }
         body { display: flex; flex-direction: column; }
 
-        /* title */
         .titlebar {
             height: 30px; min-height: 30px; flex-shrink: 0;
             background: #2d2d2d;
@@ -33,27 +32,18 @@
         }
         .titlebar span { color: var(--text-muted); font-size: 12px; font-family: -apple-system,'Segoe UI',sans-serif; }
 
-        /* workspace */
         .workspace { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-
-        /* editor row */
         .editor-row { flex: 1; display: flex; overflow: hidden; min-height: 0; }
 
-        /* line numbers */
         .line-numbers {
             width: 48px; min-width: 48px; flex-shrink: 0;
-            padding: 8px 12px 8px 0;
-            background: var(--bg);
-            color: var(--text-ln);
-            font-size: 13px; line-height: 19px;
-            text-align: right;
-            user-select: none;
-            overflow: hidden;
+            padding: 8px 12px 8px 0; background: var(--bg);
+            color: var(--text-ln); font-size: 13px; line-height: 19px;
+            text-align: right; user-select: none; overflow: hidden;
         }
         .line-number { display: block; height: 19px; }
         .line-number.active { color: var(--text); }
 
-        /* editor */
         .editor-wrap { flex: 1; overflow: auto; position: relative; }
         .editor-wrap::-webkit-scrollbar { width: 10px; height: 10px; }
         .editor-wrap::-webkit-scrollbar-track { background: transparent; }
@@ -69,11 +59,9 @@
             tab-size: 4; display: block;
         }
 
-        /* activity bar */
         .activity-bar {
             width: 36px; min-width: 36px; flex-shrink: 0;
-            background: #333333;
-            border-right: 1px solid var(--border);
+            background: #333333; border-right: 1px solid var(--border);
             display: flex; flex-direction: column; align-items: center;
             padding-top: 4px; gap: 2px;
         }
@@ -90,14 +78,24 @@
             width: 2px; background: var(--text); border-radius: 2px;
         }
 
-        /* side panel */
+        /* ── resize handle ─────────────────────────────── */
+        .resize-handle {
+            width: 4px; flex-shrink: 0; cursor: col-resize;
+            background: transparent; position: relative; z-index: 10;
+            transition: background 0.15s;
+        }
+        .resize-handle:hover, .resize-handle.dragging { background: var(--accent); }
+        .resize-handle::after {
+            content: ''; position: absolute; inset: 0 -3px;
+        }
+
+        /* env panel */
         .side-panel {
-            width: 260px; min-width: 200px; flex-shrink: 0;
+            min-width: 0; flex-shrink: 0;
             background: #252526; border-right: 1px solid var(--border);
             display: flex; flex-direction: column; overflow: hidden;
-            transition: width 0.12s ease;
         }
-        .side-panel.collapsed { width: 0; min-width: 0; border-right: none; overflow: hidden; }
+        .side-panel.collapsed { width: 0 !important; border-right: none; }
         .side-panel-header {
             height: 28px; min-height: 28px; flex-shrink: 0;
             display: flex; align-items: center; padding: 0 10px;
@@ -135,8 +133,6 @@
         .env-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.1); }
         .env-action-btn.del:hover { color: var(--red); }
         .env-empty { padding: 14px 12px; color: var(--text-muted); font-size: 12px; font-family: -apple-system,'Segoe UI',sans-serif; line-height: 1.5; }
-
-        /* env form */
         .env-form {
             border-top: 1px solid var(--border); padding: 10px;
             display: flex; flex-direction: column; gap: 6px;
@@ -148,8 +144,12 @@
         .env-field { display: flex; flex-direction: column; gap: 2px; }
         .env-input { background: #3c3c3c; border: 1px solid var(--border); color: var(--text); font-family: var(--font); font-size: 12px; padding: 4px 7px; border-radius: 3px; outline: none; width: 100%; }
         .env-input:focus { border-color: var(--accent); }
-        .env-textarea { background: #3c3c3c; border: 1px solid var(--border); color: var(--text); font-family: var(--font); font-size: 12px; padding: 4px 7px; border-radius: 3px; outline: none; width: 100%; resize: vertical; min-height: 52px; line-height: 1.5; }
+        .env-textarea { background: #3c3c3c; border: 1px solid var(--border); color: var(--text); font-family: var(--font); font-size: 12px; padding: 4px 7px; border-radius: 3px; outline: none; width: 100%; resize: vertical; min-height: 52px; line-height: 1.5; color-scheme: dark; }
         .env-textarea:focus { border-color: var(--accent); }
+        .env-textarea::-webkit-scrollbar { width: 6px; }
+        .env-textarea::-webkit-scrollbar-track { background: #2a2a2a; }
+        .env-textarea::-webkit-scrollbar-thumb { background: var(--scrollbar); }
+        .env-textarea::-webkit-scrollbar-thumb:hover { background: #666; }
         .env-form-hint { font-size: 10px; color: var(--text-muted); font-family: -apple-system,'Segoe UI',sans-serif; line-height: 1.4; }
         .env-form-btns { display: flex; gap: 6px; }
         .env-btn { flex: 1; padding: 4px 0; border: none; border-radius: 3px; font-size: 12px; font-family: -apple-system,'Segoe UI',sans-serif; cursor: pointer; font-weight: 500; }
@@ -158,69 +158,95 @@
         .env-btn-cancel { background: #3c3c3c; color: var(--text-muted); }
         .env-btn-cancel:hover { color: var(--text); }
 
-        /* minimap */
-        .minimap {
-            width: 60px; min-width: 60px; flex-shrink: 0;
-            background: var(--bg);
-            border-left: 1px solid var(--border);
-            overflow: hidden; position: relative;
-        }
-        #minimapCanvas { position: absolute; left: 0; width: 100%; }
-        .minimap-viewport {
-            position: absolute; left: 0; right: 0;
-            background: rgba(255,255,255,0.07);
-            pointer-events: none;
-        }
-
-        /* panel */
-        .panel {
-            height: 220px; min-height: 80px; flex-shrink: 0;
-            background: var(--bg);
-            border-top: 1px solid var(--border);
+        /* docs panel */
+        .docs-panel {
+            min-width: 0; flex-shrink: 0;
+            background: #252526; border-right: 1px solid var(--border);
             display: flex; flex-direction: column; overflow: hidden;
         }
-        .panel-header {
+        .docs-panel.collapsed { width: 0 !important; border-right: none; }
+        .docs-header {
             height: 28px; min-height: 28px; flex-shrink: 0;
-            background: #252526;
-            display: flex; align-items: center; padding: 0 12px;
+            display: flex; align-items: center; padding: 0 8px; gap: 4px;
             border-bottom: 1px solid var(--border);
         }
-        .panel-title {
+        .docs-back-btn {
+            width: 20px; height: 20px; cursor: pointer; flex-shrink: 0;
+            display: none; align-items: center; justify-content: center;
+            color: var(--text-muted); font-size: 16px; border-radius: 3px;
+        }
+        .docs-back-btn:hover { color: var(--text); background: rgba(255,255,255,0.07); }
+        .docs-back-btn.visible { display: flex; }
+        .docs-header-title {
             font-size: 11px; font-family: -apple-system,'Segoe UI',sans-serif;
             font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
-            color: var(--text);
-            border-bottom: 1px solid var(--accent); padding-bottom: 1px;
+            color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        .docs-file-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+        .docs-file-list::-webkit-scrollbar { width: 6px; }
+        .docs-file-list::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+        .docs-file-item {
+            padding: 7px 10px; display: flex; align-items: center; gap: 7px;
+            cursor: pointer; border-left: 2px solid transparent;
+        }
+        .docs-file-item:hover { background: rgba(255,255,255,0.04); }
+        .docs-file-item.active { background: rgba(0,122,204,0.15); border-left-color: var(--accent); }
+        .docs-file-icon { font-size: 12px; flex-shrink: 0; opacity: 0.5; }
+        .docs-file-name { font-size: 12px; color: var(--text); font-family: var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .docs-viewer {
+            flex: 1; overflow-y: auto; padding: 14px 14px 24px; display: none;
+        }
+        .docs-viewer.visible { display: block; }
+        .docs-viewer::-webkit-scrollbar { width: 6px; }
+        .docs-viewer::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
 
-        /* terminal */
-        .terminal-output {
-            flex: 1; overflow-y: auto;
-            padding: 6px 12px; line-height: 18px;
-        }
+        /* markdown styles */
+        .md h1 { font-size: 15px; font-weight: 600; color: var(--text); margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); font-family: -apple-system,'Segoe UI',sans-serif; }
+        .md h2 { font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 14px 0 5px; font-family: -apple-system,'Segoe UI',sans-serif; text-transform: uppercase; letter-spacing: 0.6px; }
+        .md h3 { font-size: 12px; font-weight: 600; color: var(--yellow); margin: 10px 0 4px; font-family: var(--font); }
+        .md p { font-size: 12px; color: var(--text); line-height: 1.65; margin: 0 0 8px; font-family: -apple-system,'Segoe UI',sans-serif; }
+        .md ul, .md ol { margin: 0 0 8px 16px; }
+        .md li { font-size: 12px; color: var(--text); line-height: 1.65; font-family: -apple-system,'Segoe UI',sans-serif; margin-bottom: 2px; }
+        .md code { font-family: var(--font); font-size: 11px; background: #2a2a2a; color: var(--green); padding: 1px 4px; border-radius: 3px; }
+        .md pre { background: #1a1a1a; border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; margin: 6px 0 10px; overflow-x: auto; }
+        .md pre code { background: none; padding: 0; color: var(--text); font-size: 12px; line-height: 1.6; }
+        .md pre::-webkit-scrollbar { height: 5px; }
+        .md pre::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+        .md table { border-collapse: collapse; width: 100%; margin: 6px 0 10px; font-size: 12px; font-family: -apple-system,'Segoe UI',sans-serif; }
+        .md th { background: #2d2d2d; color: var(--text-muted); font-weight: 600; text-align: left; padding: 5px 8px; border: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .md td { padding: 5px 8px; border: 1px solid var(--border); color: var(--text); vertical-align: top; }
+        .md td code { font-size: 11px; }
+        .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+        .md strong { font-weight: 600; color: var(--text); }
+        .md em { font-style: italic; color: var(--text-muted); }
+        .md blockquote { border-left: 3px solid var(--accent); padding: 4px 10px; margin: 6px 0 8px; background: rgba(0,122,204,0.07); border-radius: 0 3px 3px 0; }
+        .md blockquote p { color: var(--text-muted); margin: 0; }
+        .md a { color: var(--accent); text-decoration: none; }
+        .md a:hover { text-decoration: underline; }
+
+        /* minimap */
+        .minimap { width: 60px; min-width: 60px; flex-shrink: 0; background: var(--bg); border-left: 1px solid var(--border); overflow: hidden; position: relative; }
+        #minimapCanvas { position: absolute; left: 0; width: 100%; }
+        .minimap-viewport { position: absolute; left: 0; right: 0; background: rgba(255,255,255,0.07); pointer-events: none; }
+
+        .panel { height: 220px; min-height: 80px; flex-shrink: 0; background: var(--bg); border-top: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+        .panel-header { height: 28px; min-height: 28px; flex-shrink: 0; background: #252526; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--border); }
+        .panel-title { font-size: 11px; font-family: -apple-system,'Segoe UI',sans-serif; font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px; color: var(--text); border-bottom: 1px solid var(--accent); padding-bottom: 1px; }
+        .terminal-output { flex: 1; overflow-y: auto; padding: 6px 12px; line-height: 18px; }
         .terminal-output::-webkit-scrollbar { width: 8px; }
-        .terminal-output::-webkit-scrollbar-track { background: transparent; }
         .terminal-output::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
-
         .term-line { white-space: pre-wrap; word-break: break-all; min-height: 18px; }
-        .c-ok    { color: var(--green); }
-        .c-err   { color: var(--red); }
-        .c-info  { color: var(--accent); }
-        .c-muted { color: var(--text-muted); }
-        .c-hex   { color: #b5cea8; letter-spacing: 0.4px; }
-        .c-warn  { color: var(--yellow); }
-        .c-prompt{ color: var(--green); }
-
-        .terminal-input-row {
-            display: flex; align-items: center;
-            padding: 4px 12px;
-            border-top: 1px solid var(--border); flex-shrink: 0;
-        }
+        .c-ok { color: var(--green); } .c-err { color: var(--red); } .c-info { color: var(--accent); }
+        .c-muted { color: var(--text-muted); } .c-hex { color: #b5cea8; letter-spacing: 0.4px; }
+        .c-warn { color: var(--yellow); } .c-prompt { color: var(--green); }
+        .terminal-input-row { display: flex; align-items: center; padding: 4px 12px; border-top: 1px solid var(--border); flex-shrink: 0; }
         .term-prompt-label { color: var(--green); white-space: nowrap; user-select: none; }
-        #termInput {
-            flex: 1; background: none; border: none; outline: none;
-            color: var(--text); font-family: var(--font); font-size: 13px;
-            caret-color: #fff; padding: 2px 4px;
-        }
+        #termInput { flex: 1; background: none; border: none; outline: none; color: var(--text); font-family: var(--font); font-size: 13px; caret-color: #fff; padding: 2px 4px; }
+
+        /* global drag cursor override */
+        body.dragging-panel { cursor: col-resize !important; user-select: none !important; }
+        body.dragging-panel * { pointer-events: none !important; }
+        body.dragging-panel .resize-handle { pointer-events: auto !important; }
     </style>
 </head>
 <body>
@@ -229,10 +255,14 @@
 
 <div class="workspace">
     <div class="editor-row">
+
         <div class="activity-bar">
-            <div class="activity-btn" id="activityEnv" title="Env Imports" onclick="toggleSidePanel()">⚙</div>
+            <div class="activity-btn" id="activityEnv"  title="Env Imports"   onclick="toggleEnvPanel()">⚙</div>
+            <div class="activity-btn" id="activityDocs" title="Documentation" onclick="toggleDocsPanel()">📄</div>
         </div>
-        <div class="side-panel collapsed" id="sidePanel">
+
+        <!-- env panel + resize handle -->
+        <div class="side-panel collapsed" id="sidePanel" style="width:260px">
             <div class="side-panel-header">
                 <span class="side-panel-title">Env Imports</span>
                 <span class="side-panel-add" title="Add import" onclick="openForm()">+</span>
@@ -259,14 +289,22 @@
                 </div>
             </div>
         </div>
+        <div class="resize-handle" id="resizeEnv" title="Drag to resize"></div>
+
+        <!-- docs panel + resize handle -->
+        <div class="docs-panel collapsed" id="docsPanel" style="width:280px">
+            <div class="docs-header">
+                <span class="docs-back-btn" id="docsBack" onclick="showDocsList()">‹</span>
+                <span class="docs-header-title" id="docsHeaderTitle">Documentation</span>
+            </div>
+            <div class="docs-file-list" id="docsFileList"></div>
+            <div class="docs-viewer md" id="docsViewer"></div>
+        </div>
+        <div class="resize-handle" id="resizeDocs" title="Drag to resize"></div>
+
         <div class="line-numbers" id="lineNumbers"><span class="line-number active">1</span></div>
         <div class="editor-wrap" id="editorWrap">
-            <textarea id="code" spellcheck="false" autocorrect="off" autocapitalize="off"
-placeholder="export add i32 i32 => i32
-get 0
-get 1
-add i32
-return"></textarea>
+            <textarea id="code" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
         </div>
         <div class="minimap" id="minimapContainer">
             <canvas id="minimapCanvas"></canvas>
@@ -285,112 +323,160 @@ return"></textarea>
 </div>
 
 <script>
-// ── COMPILER ──────────────────────────────────────
+// ── PANEL RESIZE ──────────────────────────────────
 
-function encodeULEB128(v) {
-    const b=[];
-    do { let byte=v&0x7F; v>>>=7; if(v!==0)byte|=0x80; b.push(byte); } while(v!==0);
-    return b;
-}
+function makeResizable(handleId, panelId, minW, maxW, storageKey) {
+    const handle = document.getElementById(handleId);
+    const panel  = document.getElementById(panelId);
+    let startX, startW, dragging = false;
 
-function encodeWasmInstruction(words) {
-    let type="i32";
-    const validTypes=["empty","i32","i64","f32","f64"];
-    if(words.length>1&&validTypes.includes(words[1])){type=words[1];words.splice(1,1);}
-    const op={
-        get:0x20,return:0x0F,drop:0x1A,call:0x10,if:0x04,else:0x05,end:0x0B,
-        add:{i32:0x6A,i64:0x7C,f32:0x92,f64:0xA0},
-        sub:{i32:0x6B,i64:0x7D,f32:0x93,f64:0xA1},
-        mul:{i32:0x6C,i64:0x7E,f32:0x94,f64:0xA2},
-        div:{i32:0x6D,i64:0x7F,f32:0x95,f64:0xA3},
-        const:{i32:0x41,i64:0x42,f32:0x43,f64:0x44}
-    };
-    const bt={empty:0x40,i32:0x7F,i64:0x7E,f32:0x7D,f64:0x7C};
-    switch(words[0]){
-        case"get":    return[op.get,...encodeULEB128(Number(words[1]))];
-        case"const":  return[op.const[type],...encodeULEB128(Number(words[1]))];
-        case"drop":   return[op.drop];
-        case"call":   return[op.call,...encodeULEB128(Number(words[1]))];
-        case"if":     return[op.if,bt[type]];
-        case"else":   return[op.else];
-        case"end":    return[op.end];
-        case"add":case"sub":case"mul":case"div": return[op[words[0]][type]];
-        case"return": return[op.return];
-        default:      return[Number(words[0])];
-    }
-}
+    // restore saved width
+    const saved = localStorage.getItem(storageKey);
+    if (saved) panel.style.width = saved + 'px';
 
-function compile(code) {
-    const lines=code.split('\n').map(l=>l.trim()).filter(l=>l.length>0&&!l.startsWith(';'));
-    if(!lines.length) return null;
-    const bytes=[0x00,0x61,0x73,0x6D,0x01,0x00,0x00,0x00];
-    let types=[],functions=[],imports=[],exports=[],codes=[],tmp=[];
-    const tmap={i32:0x7F,i64:0x7E,f32:0x7D,f64:0x7C};
-
-    for(const line of lines){
-        const words=line.split(' ').filter(p=>p.length>0);
-        if(!words.length) continue;
-        if(words[0]==='export'){
-            if(tmp.length){codes.push(tmp);tmp=[];}
-            let inputs=[],outputs=[],mode="inputs";
-            for(let j=2;j<words.length;j++){
-                if(words[j]==='=>'){mode="outputs";continue;}
-                if(tmap[words[j]])(mode==="inputs"?inputs:outputs).push(tmap[words[j]]);
-            }
-            types.push({inputs,outputs});functions.push(types.length-1);exports.push({name:words[1]});
-        } else if(words[0]==='import'){
-            if(tmp.length){codes.push(tmp);tmp=[];}
-            let inputs=[],outputs=[],mode="inputs";
-            for(let j=3;j<words.length;j++){
-                if(words[j]==='=>'){mode="outputs";continue;}
-                if(tmap[words[j]])(mode==="inputs"?inputs:outputs).push(tmap[words[j]]);
-            }
-            types.push({inputs,outputs});imports.push({module:words[1],name:words[2],typeIndex:types.length-1});
-        } else { tmp.push(...encodeWasmInstruction(words)); }
-    }
-    if(tmp.length) codes.push(tmp);
-
-    // type section
-    bytes.push(0x01);
-    let tsl=1;types.forEach(t=>{tsl+=1+1+t.inputs.length+1+t.outputs.length;});
-    bytes.push(...encodeULEB128(tsl),types.length);
-    types.forEach(t=>{bytes.push(0x60,t.inputs.length,...t.inputs,t.outputs.length,...t.outputs);});
-
-    // import section
-    bytes.push(0x02);
-    let isl=1;imports.forEach(i=>{isl+=1+i.module.length+1+i.name.length+2;});
-    bytes.push(...encodeULEB128(isl),imports.length);
-    imports.forEach(imp=>{
-        bytes.push(imp.module.length,...[...imp.module].map(c=>c.charCodeAt(0)));
-        bytes.push(imp.name.length,...[...imp.name].map(c=>c.charCodeAt(0)));
-        bytes.push(0x00,...encodeULEB128(imp.typeIndex));
+    handle.addEventListener('mousedown', e => {
+        // only resize when panel is open
+        if (panel.classList.contains('collapsed')) return;
+        dragging = true;
+        startX = e.clientX;
+        startW = panel.offsetWidth;
+        handle.classList.add('dragging');
+        document.body.classList.add('dragging-panel');
+        e.preventDefault();
     });
 
-    // function section
-    bytes.push(0x03,...encodeULEB128(1+functions.length),functions.length);
-    functions.forEach(f=>bytes.push(...encodeULEB128(f)));
+    document.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        const delta = e.clientX - startX;
+        const newW  = Math.max(minW, Math.min(maxW, startW + delta));
+        panel.style.width = newW + 'px';
+    });
 
-    // export section
-    if(exports.length){
-        bytes.push(0x07);
-        let esl=1;exports.forEach(e=>{esl+=1+e.name.length+2;});
-        bytes.push(...encodeULEB128(esl),exports.length);
-        exports.forEach((e,idx)=>{
-            bytes.push(e.name.length,...[...e.name].map(c=>c.charCodeAt(0)));
-            bytes.push(0x00,...encodeULEB128(idx+imports.length));
-        });
-    }
-
-    // code section
-    bytes.push(0x0A);
-    const bodies=codes.map(c=>{const b=[0x00,...c,0x0B];return[...encodeULEB128(b.length),...b];});
-    let csl=1;bodies.forEach(b=>csl+=b.length);
-    bytes.push(...encodeULEB128(csl),codes.length);
-    bodies.forEach(b=>bytes.push(...b));
-    return new Uint8Array(bytes);
+    document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('dragging');
+        document.body.classList.remove('dragging-panel');
+        localStorage.setItem(storageKey, panel.offsetWidth);
+    });
 }
 
-// ── ENV IMPORTS PANEL ─────────────────────────────
+makeResizable('resizeEnv',  'sidePanel',  140, 520, 'wasm-env-panel-w');
+makeResizable('resizeDocs', 'docsPanel',  140, 520, 'wasm-docs-panel-w');
+
+// ── DOCS ──────────────────────────────────────────
+
+const DOC_FILES = [
+    'language.md',
+    'examples.md'
+];
+
+const docsCache = {};
+let currentDoc  = null;
+
+function toggleDocsPanel() {
+    const panel = document.getElementById('docsPanel');
+    const btn   = document.getElementById('activityDocs');
+    const open  = panel.classList.toggle('collapsed') === false;
+    btn.classList.toggle('active', open);
+    if (open) showDocsList();
+}
+
+function showDocsList() {
+    currentDoc = null;
+    document.getElementById('docsBack').classList.remove('visible');
+    document.getElementById('docsHeaderTitle').textContent = 'Documentation';
+    document.getElementById('docsViewer').classList.remove('visible');
+    document.getElementById('docsFileList').style.display = 'block';
+    renderDocsList();
+}
+
+function renderDocsList() {
+    const list = document.getElementById('docsFileList');
+    list.innerHTML = DOC_FILES.map(name => `
+        <div class="docs-file-item${currentDoc===name?' active':''}" onclick="openDoc('${name}')">
+            <span class="docs-file-icon">▸</span>
+            <span class="docs-file-name">${esc(name)}</span>
+        </div>`).join('');
+}
+
+async function openDoc(name) {
+    currentDoc = name;
+    renderDocsList();
+
+    document.getElementById('docsFileList').style.display = 'none';
+    document.getElementById('docsBack').classList.add('visible');
+    document.getElementById('docsHeaderTitle').textContent = name;
+
+    const viewer = document.getElementById('docsViewer');
+    viewer.classList.add('visible');
+
+    if (typeof docsCache[name] === 'string') {
+        viewer.innerHTML = renderMarkdown(docsCache[name]);
+        return;
+    }
+    if (docsCache[name] instanceof Error) {
+        showDocError(viewer, name, docsCache[name]);
+        return;
+    }
+
+    viewer.innerHTML = `<p style="color:var(--text-muted);font-size:12px;font-family:-apple-system,'Segoe UI',sans-serif;">Loading…</p>`;
+
+    try {
+        const res = await fetch(`docs/${name}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`);
+        const text = await res.text();
+        docsCache[name] = text;
+        if (currentDoc === name) viewer.innerHTML = renderMarkdown(text);
+    } catch (err) {
+        docsCache[name] = err;
+        if (currentDoc === name) showDocError(viewer, name, err);
+    }
+}
+
+function showDocError(viewer, name, err) {
+    viewer.innerHTML = `<p style="color:var(--red);font-size:12px;font-family:-apple-system,'Segoe UI',sans-serif;line-height:1.6;">
+        Failed to load <code style="font-size:11px;">${esc(name)}</code><br>
+        <span style="color:var(--text-muted);">${esc(err.message)}</span></p>`;
+}
+
+function renderMarkdown(md) {
+    let s = md
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/```[^\n]*\n([\s\S]*?)```/g, (_,code) =>
+            `<pre><code>${code.trimEnd()}</code></pre>`)
+        .replace(/^### (.+)$/gm,'<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm,  '<h1>$1</h1>')
+        .replace(/^&gt; (.+)$/gm,'<blockquote><p>$1</p></blockquote>')
+        .replace(/^---$/gm,'<hr>')
+        .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g,'<em>$1</em>')
+        .replace(/`([^`]+)`/g,'<code>$1</code>')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank">$1</a>')
+        .replace(/(\|.+\|\n)((?:\|[-: ]+\|)+\n)((?:\|.+\|\n?)*)/g, (_,head,_sep,body) => {
+            const th = head.trim().split('|').filter(c=>c.trim()).map(c=>`<th>${c.trim()}</th>`).join('');
+            const rows = body.trim().split('\n').filter(Boolean).map(r =>
+                '<tr>'+r.split('|').filter(c=>c.trim()).map(c=>`<td>${c.trim()}</td>`).join('')+'</tr>'
+            ).join('');
+            return `<table><thead><tr>${th}</tr></thead><tbody>${rows}</tbody></table>`;
+        })
+        .replace(/((?:^- .+\n?)+)/gm, block => {
+            const items = block.trim().split('\n').map(l=>`<li>${l.slice(2)}</li>`).join('');
+            return `<ul>${items}</ul>`;
+        });
+
+    s = s.split(/\n{2,}/).map(chunk => {
+        const t = chunk.trim();
+        if (!t) return '';
+        if (/^<(h[1-3]|ul|ol|pre|table|blockquote|hr)/.test(t)) return t;
+        return `<p>${t.replace(/\n/g,' ')}</p>`;
+    }).join('\n');
+
+    return s;
+}
+
+// ── ENV IMPORTS ───────────────────────────────────
 
 let envImports = [
     { name: 'pow', sig: 'i32 i32 => i32', body: 'return Math.pow(a, b)|0;' },
@@ -398,7 +484,7 @@ let envImports = [
 ];
 let editingIdx = null;
 
-function toggleSidePanel() {
+function toggleEnvPanel() {
     const panel = document.getElementById('sidePanel');
     const btn   = document.getElementById('activityEnv');
     const collapsed = panel.classList.toggle('collapsed');
@@ -411,180 +497,182 @@ function renderEnvList() {
         list.innerHTML = '<div class="env-empty">No env imports.<br>Click + to add one.</div>';
         return;
     }
-    list.innerHTML = envImports.map((e, i) => {
-        const sig = e.sig || '() => ()';
-        return `<div class="env-item" onclick="selectEnv(${i})">
+    list.innerHTML = envImports.map((e, i) => `
+        <div class="env-item" onclick="selectEnv(${i})">
             <div class="env-item-name">${esc(e.name)}</div>
-            <div class="env-item-sig">${esc(sig)}</div>
+            <div class="env-item-sig">${esc(e.sig||'')}</div>
             <div class="env-item-actions">
-                <button class="env-action-btn" title="Edit" onclick="event.stopPropagation();editEnv(${i})">✎</button>
-                <button class="env-action-btn del" title="Delete" onclick="event.stopPropagation();deleteEnv(${i})">✕</button>
+                <button class="env-action-btn" onclick="event.stopPropagation();editEnv(${i})">✎</button>
+                <button class="env-action-btn del" onclick="event.stopPropagation();deleteEnv(${i})">✕</button>
             </div>
-        </div>`;
-    }).join('');
+        </div>`).join('');
 }
-
-function selectEnv(i) {
-    document.querySelectorAll('.env-item').forEach((el,j)=>el.classList.toggle('selected', j===i));
-}
-
-function openForm(idx=null) {
-    editingIdx = idx;
-    const form = document.getElementById('envForm');
-    document.getElementById('envFormTitle').textContent = idx===null ? 'New Import' : 'Edit Import';
-    if (idx !== null) {
-        const e = envImports[idx];
-        document.getElementById('envName').value = e.name;
-        document.getElementById('envSig').value  = e.sig;
-        document.getElementById('envBody').value = e.body;
-    } else {
-        document.getElementById('envName').value = '';
-        document.getElementById('envSig').value  = '';
-        document.getElementById('envBody').value = '';
-    }
-    form.classList.remove('hidden');
+function selectEnv(i){document.querySelectorAll('.env-item').forEach((el,j)=>el.classList.toggle('selected',j===i));}
+function openForm(idx=null){
+    editingIdx=idx;
+    document.getElementById('envFormTitle').textContent=idx===null?'New Import':'Edit Import';
+    const e=idx!==null?envImports[idx]:{name:'',sig:'',body:''};
+    document.getElementById('envName').value=e.name;
+    document.getElementById('envSig').value=e.sig;
+    document.getElementById('envBody').value=e.body;
+    document.getElementById('envForm').classList.remove('hidden');
     document.getElementById('envName').focus();
 }
-
-function closeForm() {
-    document.getElementById('envForm').classList.add('hidden');
-    editingIdx = null;
+function closeForm(){document.getElementById('envForm').classList.add('hidden');editingIdx=null;}
+function editEnv(i){openForm(i);}
+function deleteEnv(i){envImports.splice(i,1);renderEnvList();closeForm();print(`<span class="c-muted">env import removed</span>`);print('');}
+function saveEnv(){
+    const name=document.getElementById('envName').value.trim();
+    const sig=document.getElementById('envSig').value.trim();
+    const body=document.getElementById('envBody').value.trim();
+    if(!name){document.getElementById('envName').focus();return;}
+    const entry={name,sig,body};
+    if(editingIdx!==null){envImports[editingIdx]=entry;}else{envImports.push(entry);}
+    renderEnvList();closeForm();
+    print(`<span class="c-muted">env import saved: </span><span class="c-ok">${esc(name)}</span>`);print('');
 }
-
-function editEnv(i) { openForm(i); }
-
-function deleteEnv(i) {
-    envImports.splice(i, 1);
-    renderEnvList();
-    closeForm();
-    print(`<span class="c-muted">env import removed</span>`);
-    print('');
-}
-
-function saveEnv() {
-    const name = document.getElementById('envName').value.trim();
-    const sig  = document.getElementById('envSig').value.trim();
-    const body = document.getElementById('envBody').value.trim();
-    if (!name) { document.getElementById('envName').focus(); return; }
-
-    const entry = { name, sig, body };
-    if (editingIdx !== null) {
-        envImports[editingIdx] = entry;
-    } else {
-        envImports.push(entry);
-    }
-    renderEnvList();
-    closeForm();
-    print(`<span class="c-muted">env import saved: </span><span class="c-ok">${esc(name)}</span>`);
-    print('');
-}
-
-function buildEnvObject() {
-    const env = {};
-    const argNames = ['a','b','c','d','e','f','g','h'];
-    for (const imp of envImports) {
-        // count inputs from sig
-        const parts = imp.sig.split('=>')[0].trim().split(/\s+/).filter(Boolean);
-        const argCount = parts.length;
-        const args = argNames.slice(0, argCount);
-        try {
-            env[imp.name] = new Function(...args, imp.body || 'return 0;');
-        } catch(err) {
-            throw new Error(`env.${imp.name}: ${err.message}`);
-        }
+function buildEnvObject(){
+    const env={},argNames=['a','b','c','d','e','f','g','h'];
+    for(const imp of envImports){
+        const parts=imp.sig.split('=>')[0].trim().split(/\s+/).filter(Boolean);
+        const args=argNames.slice(0,parts.length);
+        try{env[imp.name]=new Function(...args,imp.body||'return 0;');}
+        catch(err){throw new Error(`env.${imp.name}: ${err.message}`);}
     }
     return env;
 }
-
 renderEnvList();
 
+// ── COMPILER ──────────────────────────────────────
 
+function encodeULEB128(v){const b=[];do{let byte=v&0x7F;v>>>=7;if(v!==0)byte|=0x80;b.push(byte);}while(v!==0);return b;}
+function encodeWasmInstruction(words){
+    let type="i32";
+    const validTypes=["empty","i32","i64","f32","f64"];
+    if(words.length>1&&validTypes.includes(words[1])){type=words[1];words.splice(1,1);}
+    const op={get:0x20,return:0x0F,drop:0x1A,call:0x10,if:0x04,else:0x05,end:0x0B,
+        add:{i32:0x6A,i64:0x7C,f32:0x92,f64:0xA0},sub:{i32:0x6B,i64:0x7D,f32:0x93,f64:0xA1},
+        mul:{i32:0x6C,i64:0x7E,f32:0x94,f64:0xA2},div:{i32:0x6D,i64:0x7F,f32:0x95,f64:0xA3},
+        const:{i32:0x41,i64:0x42,f32:0x43,f64:0x44}};
+    const bt={empty:0x40,i32:0x7F,i64:0x7E,f32:0x7D,f64:0x7C};
+    switch(words[0]){
+        case"get":   return[op.get,...encodeULEB128(Number(words[1]))];
+        case"const": return[op.const[type],...encodeULEB128(Number(words[1]))];
+        case"drop":  return[op.drop];
+        case"call":  return[op.call,...encodeULEB128(Number(words[1]))];
+        case"if":    return[op.if,bt[type]];
+        case"else":  return[op.else];
+        case"end":   return[op.end];
+        case"add":case"sub":case"mul":case"div":return[op[words[0]][type]];
+        case"return":return[op.return];
+        default:     return[Number(words[0])];
+    }
+}
+function compile(code){
+    const lines=code.split('\n').map(l=>l.trim()).filter(l=>l.length>0&&!l.startsWith(';'));
+    if(!lines.length) return null;
+    const bytes=[0x00,0x61,0x73,0x6D,0x01,0x00,0x00,0x00];
+    let types=[],functions=[],imports=[],exports=[],codes=[],tmp=[];
+    const tmap={i32:0x7F,i64:0x7E,f32:0x7D,f64:0x7C};
+    for(const line of lines){
+        const words=line.split(' ').filter(p=>p.length>0);if(!words.length) continue;
+        if(words[0]==='export'){
+            if(tmp.length){codes.push(tmp);tmp=[];}
+            let inputs=[],outputs=[],mode="inputs";
+            for(let j=2;j<words.length;j++){if(words[j]==='=>'){mode="outputs";continue;}if(tmap[words[j]])(mode==="inputs"?inputs:outputs).push(tmap[words[j]]);}
+            types.push({inputs,outputs});functions.push(types.length-1);exports.push({name:words[1]});
+        } else if(words[0]==='import'){
+            if(tmp.length){codes.push(tmp);tmp=[];}
+            let inputs=[],outputs=[],mode="inputs";
+            for(let j=3;j<words.length;j++){if(words[j]==='=>'){mode="outputs";continue;}if(tmap[words[j]])(mode==="inputs"?inputs:outputs).push(tmap[words[j]]);}
+            types.push({inputs,outputs});imports.push({module:words[1],name:words[2],typeIndex:types.length-1});
+        } else { tmp.push(...encodeWasmInstruction(words)); }
+    }
+    if(tmp.length) codes.push(tmp);
+    bytes.push(0x01);let tsl=1;types.forEach(t=>{tsl+=1+1+t.inputs.length+1+t.outputs.length;});
+    bytes.push(...encodeULEB128(tsl),types.length);
+    types.forEach(t=>{bytes.push(0x60,t.inputs.length,...t.inputs,t.outputs.length,...t.outputs);});
+    bytes.push(0x02);let isl=1;imports.forEach(i=>{isl+=1+i.module.length+1+i.name.length+2;});
+    bytes.push(...encodeULEB128(isl),imports.length);
+    imports.forEach(imp=>{bytes.push(imp.module.length,...[...imp.module].map(c=>c.charCodeAt(0)));bytes.push(imp.name.length,...[...imp.name].map(c=>c.charCodeAt(0)));bytes.push(0x00,...encodeULEB128(imp.typeIndex));});
+    bytes.push(0x03,...encodeULEB128(1+functions.length),functions.length);
+    functions.forEach(f=>bytes.push(...encodeULEB128(f)));
+    if(exports.length){bytes.push(0x07);let esl=1;exports.forEach(e=>{esl+=1+e.name.length+2;});bytes.push(...encodeULEB128(esl),exports.length);exports.forEach((e,idx)=>{bytes.push(e.name.length,...[...e.name].map(c=>c.charCodeAt(0)));bytes.push(0x00,...encodeULEB128(idx+imports.length));});}
+    bytes.push(0x0A);const bodies=codes.map(c=>{const b=[0x00,...c,0x0B];return[...encodeULEB128(b.length),...b];});
+    let csl=1;bodies.forEach(b=>csl+=b.length);bytes.push(...encodeULEB128(csl),codes.length);bodies.forEach(b=>bytes.push(...b));
+    const result=new Uint8Array(bytes);
+    const meta={};exports.forEach((e,idx)=>{const typeIdx=functions[idx];meta[e.name]=types[typeIdx].inputs.length;});
+    result.meta=meta;
+    return result;
+}
+
+// ── TERMINAL ──────────────────────────────────────
 
 const termOutput=document.getElementById('termOutput');
 const termInput=document.getElementById('termInput');
-let cmdHistory=[],histIdx=-1,lastBinary=null,lastInstance=null;
+let cmdHistory=[],histIdx=-1,lastBinary=null,lastInstance=null,lastMeta={};
 
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-
-function print(html){
-    const d=document.createElement('div');
-    d.className='term-line';d.innerHTML=html;
-    termOutput.appendChild(d);
-    termOutput.scrollTop=termOutput.scrollHeight;
-}
+function print(html){const d=document.createElement('div');d.className='term-line';d.innerHTML=html;termOutput.appendChild(d);termOutput.scrollTop=termOutput.scrollHeight;}
 
 print(`<span class="c-info">WASM Assembler ready.</span>`);
 print(`<span class="c-muted">make · build · run &lt;fn&gt; [args] · hex · clear · help</span>`);
 print('');
 
 async function runCommand(raw){
-    const cmd=raw.trim();
-    if(!cmd) return;
+    const cmd=raw.trim();if(!cmd) return;
     cmdHistory.unshift(cmd);histIdx=-1;
     print(`<span class="c-prompt">wasm $ </span>${esc(cmd)}`);
     const parts=cmd.split(/\s+/),verb=parts[0].toLowerCase();
-
     if(verb==='help'){
-        print(`<span class="c-muted">  make          — compile &amp; test with (5, 3)</span>`);
+        print(`<span class="c-muted">  make [args]   — compile &amp; test exports with given args (padded with 0s)</span>`);
         print(`<span class="c-muted">  build         — compile only</span>`);
         print(`<span class="c-muted">  run fn [args] — call exported function</span>`);
         print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
         print(`<span class="c-muted">  clear         — clear terminal</span>`);
-
     } else if(verb==='clear'){
         termOutput.innerHTML='';
-
     } else if(verb==='build'||verb==='make'){
         const code=document.getElementById('code').value;
         if(!code.trim()){print(`<span class="c-err">✗ editor is empty</span>`);return;}
         print(`<span class="c-muted">compiling…</span>`);
         try{
-            const binary=compile(code);
-            if(!binary) throw new Error('compile() returned null');
-            lastBinary=binary;
+            const binary=compile(code);if(!binary) throw new Error('compile() returned null');
+            lastBinary=binary;lastMeta=binary.meta||{};
             print(`<span class="c-ok">✓ ${binary.length} bytes</span>`);
-            let hex='';
-            const lim=Math.min(binary.length,48);
+            let hex='';const lim=Math.min(binary.length,48);
             for(let i=0;i<lim;i++) hex+=binary[i].toString(16).padStart(2,'0').toUpperCase()+' ';
             if(binary.length>48) hex+=`<span class="c-muted">… +${binary.length-48}</span>`;
             print(`<span class="c-hex">${hex}</span>`);
-
             const mod=await WebAssembly.compile(binary);
-            lastInstance=await WebAssembly.instantiate(mod,{ env: buildEnvObject() });
+            lastInstance=await WebAssembly.instantiate(mod,{env:buildEnvObject()});
             const exps=Object.keys(lastInstance.exports);
             print(`<span class="c-muted">exports: </span><span class="c-ok">${exps.map(esc).join(', ')}</span>`);
-
             if(verb==='make'){
+                const supplied=parts.slice(1).map(Number);
                 for(const fn of exps){
                     if(typeof lastInstance.exports[fn]!=='function') continue;
-                    try{
-                        const r=lastInstance.exports[fn](5,3);
-                        print(`<span class="c-muted">  ${esc(fn)}(5, 3) → </span><span class="c-ok">${r}</span>`);
-                    }catch(e){print(`<span class="c-muted">  ${esc(fn)}(5, 3) → </span><span class="c-err">${esc(e.message)}</span>`);}
+                    const needed=lastMeta[fn]??supplied.length;
+                    const testArgs=Array.from({length:needed},(_,i)=>i<supplied.length?supplied[i]:0);
+                    const argLabel=testArgs.join(', ');
+                    try{const r=lastInstance.exports[fn](...testArgs);print(`<span class="c-muted">  ${esc(fn)}(${argLabel}) → </span><span class="c-ok">${r}</span>`);}
+                    catch(e){print(`<span class="c-muted">  ${esc(fn)}(${argLabel}) → </span><span class="c-err">${esc(e.message)}</span>`);}
                 }
             }
         }catch(e){print(`<span class="c-err">✗ ${esc(e.message)}</span>`);}
-
     } else if(verb==='run'){
         if(!lastInstance){print(`<span class="c-warn">⚠ run make first</span>`);return;}
         const fn=parts[1],args=parts.slice(2).map(Number);
         if(!fn){print(`<span class="c-err">usage: run &lt;fn&gt; [args]</span>`);return;}
         const func=lastInstance.exports[fn];
         if(!func||typeof func!=='function'){print(`<span class="c-err">✗ no export "${esc(fn)}"</span>`);return;}
-        try{
-            const r=func(...args);
-            print(`<span class="c-muted">${esc(fn)}(${args.join(', ')}) → </span><span class="c-ok">${r}</span>`);
-        }catch(e){print(`<span class="c-err">✗ ${esc(e.message)}</span>`);}
-
+        try{const r=func(...args);print(`<span class="c-muted">${esc(fn)}(${args.join(', ')}) → </span><span class="c-ok">${r}</span>`);}
+        catch(e){print(`<span class="c-err">✗ ${esc(e.message)}</span>`);}
     } else if(verb==='hex'){
         if(!lastBinary){print(`<span class="c-warn">⚠ run build first</span>`);return;}
         let row='';
-        for(let i=0;i<lastBinary.length;i++){
-            row+=lastBinary[i].toString(16).padStart(2,'0').toUpperCase()+' ';
-            if((i+1)%16===0){print(`<span class="c-hex">${row}</span>`);row='';}
-        }
+        for(let i=0;i<lastBinary.length;i++){row+=lastBinary[i].toString(16).padStart(2,'0').toUpperCase()+' ';if((i+1)%16===0){print(`<span class="c-hex">${row}</span>`);row='';}}
         if(row) print(`<span class="c-hex">${row}</span>`);
-
     } else {
         print(`<span class="c-err">✗ unknown command: ${esc(verb)}</span>`);
     }
@@ -604,94 +692,43 @@ const codeEl=document.getElementById('code');
 const lineNums=document.getElementById('lineNumbers');
 const editorWrap=document.getElementById('editorWrap');
 
-function getCursorLine(){
-    return codeEl.value.substring(0,codeEl.selectionStart).split('\n').length;
-}
-
+function getCursorLine(){return codeEl.value.substring(0,codeEl.selectionStart).split('\n').length;}
 function updateLineNumbers(){
-    const lines=codeEl.value.split('\n');
-    const cur=getCursorLine();
-    let html='';
-    for(let i=1;i<=lines.length;i++) html+=`<span class="line-number${i===cur?' active':''}">${i}</span>`;
-    lineNums.innerHTML=html;
-    lineNums.scrollTop=editorWrap.scrollTop;
-    updateMinimap();
+    const lines=codeEl.value.split('\n');const cur=getCursorLine();
+    let html='';for(let i=1;i<=lines.length;i++) html+=`<span class="line-number${i===cur?' active':''}">${i}</span>`;
+    lineNums.innerHTML=html;lineNums.scrollTop=editorWrap.scrollTop;updateMinimap();
 }
-
-editorWrap.addEventListener('scroll',()=>{ lineNums.scrollTop=editorWrap.scrollTop; updateMinimap(); });
+editorWrap.addEventListener('scroll',()=>{lineNums.scrollTop=editorWrap.scrollTop;updateMinimap();});
 codeEl.addEventListener('input',updateLineNumbers);
 codeEl.addEventListener('keyup',updateLineNumbers);
 codeEl.addEventListener('click',updateLineNumbers);
 codeEl.addEventListener('keydown',e=>{
-    if(e.key==='Tab'){
-        e.preventDefault();
-        const s=codeEl.selectionStart,end=codeEl.selectionEnd;
-        codeEl.value=codeEl.value.substring(0,s)+'    '+codeEl.value.substring(end);
-        codeEl.selectionStart=codeEl.selectionEnd=s+4;
-        updateLineNumbers();
-    }
-    if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){
-        e.preventDefault();runCommand('make');termInput.focus();
-    }
+    if(e.key==='Tab'){e.preventDefault();const s=codeEl.selectionStart,end=codeEl.selectionEnd;codeEl.value=codeEl.value.substring(0,s)+'    '+codeEl.value.substring(end);codeEl.selectionStart=codeEl.selectionEnd=s+4;updateLineNumbers();}
+    if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();runCommand('make');termInput.focus();}
 });
 
 // ── MINIMAP ───────────────────────────────────────
-// Each line = exactly 2px tall, 1px gap.
-// Panel scrolls so cursor line stays centred.
 
 const minimapCanvas=document.getElementById('minimapCanvas');
 const minimapViewport=document.getElementById('minimapViewport');
 const minimapContainer=document.getElementById('minimapContainer');
-const LINE_PX=2, LINE_GAP=1, LINE_STRIDE=LINE_PX+LINE_GAP;
-
+const LINE_PX=2,LINE_GAP=1,LINE_STRIDE=LINE_PX+LINE_GAP;
 updateLineNumbers();
 
 function updateMinimap(){
     const lines=codeEl.value.split('\n');
-    const n=lines.length;
-    const W=minimapContainer.offsetWidth;
-    const totalH=n*LINE_STRIDE;
-
-    minimapCanvas.width=W;
-    minimapCanvas.height=totalH;
-    minimapCanvas.style.width=W+'px';
-    minimapCanvas.style.height=totalH+'px';
-
-    const ctx=minimapCanvas.getContext('2d');
-    ctx.clearRect(0,0,W,totalH);
-
-    lines.forEach((line,i)=>{
-        if(!line.trim()) return;
-        const alpha=Math.min(0.7,0.2+line.trim().length*0.015);
-        ctx.fillStyle=`rgba(212,212,212,${alpha})`;
-        const w=Math.min(W-4,line.length*1.4);
-        ctx.fillRect(2,i*LINE_STRIDE,w,LINE_PX);
-    });
-
-    // viewport band
-    const containerH=minimapContainer.offsetHeight;
-    const editorH=editorWrap.offsetHeight;
-    const contentH=codeEl.scrollHeight||editorH;
-    const visibleRatio=Math.min(1,editorH/contentH);
-    const vpH=Math.max(6,Math.round(totalH*visibleRatio));
-
-    // cursor line
-    const curLine=getCursorLine();
-    const cursorY=(curLine-1)*LINE_STRIDE;
-
-    // scroll minimap so cursor line is centred in the container
-    let offsetTop=cursorY-containerH/2;
-    offsetTop=Math.max(0,Math.min(totalH-containerH,offsetTop));
-
+    const W=minimapContainer.offsetWidth,totalH=lines.length*LINE_STRIDE;
+    minimapCanvas.width=W;minimapCanvas.height=totalH;minimapCanvas.style.width=W+'px';minimapCanvas.style.height=totalH+'px';
+    const ctx=minimapCanvas.getContext('2d');ctx.clearRect(0,0,W,totalH);
+    lines.forEach((line,i)=>{if(!line.trim()) return;const alpha=Math.min(0.7,0.2+line.trim().length*0.015);ctx.fillStyle=`rgba(212,212,212,${alpha})`;ctx.fillRect(2,i*LINE_STRIDE,Math.min(W-4,line.length*1.4),LINE_PX);});
+    const containerH=minimapContainer.offsetHeight,editorH=editorWrap.offsetHeight,contentH=codeEl.scrollHeight||editorH;
+    const vpH=Math.max(6,Math.round(totalH*Math.min(1,editorH/contentH)));
+    const cursorY=(getCursorLine()-1)*LINE_STRIDE;
+    let offsetTop=Math.max(0,Math.min(totalH-containerH,cursorY-containerH/2));
     minimapCanvas.style.top=(-offsetTop)+'px';
-
-    // viewport band position (relative to canvas position)
-    const scrollRatio=contentH>editorH ? editorWrap.scrollTop/(contentH-editorH) : 0;
-    const vpTop=scrollRatio*(totalH-vpH)-offsetTop;
-    minimapViewport.style.top=vpTop+'px';
-    minimapViewport.style.height=vpH+'px';
+    const scrollRatio=contentH>editorH?editorWrap.scrollTop/(contentH-editorH):0;
+    minimapViewport.style.top=(scrollRatio*(totalH-vpH)-offsetTop)+'px';minimapViewport.style.height=vpH+'px';
 }
-
 window.addEventListener('resize',updateMinimap);
 setTimeout(updateMinimap,50);
 </script>
