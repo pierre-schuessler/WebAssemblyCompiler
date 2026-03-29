@@ -117,70 +117,101 @@ function showDocError(viewer, name, err) {
 }
 
 function renderMarkdown(md) {
-  let s = md
+  if (!md) return "";
+
+  // Extract code blocks first to prevent formatting inside them
+  const codeBlocks = [];
+  md = md.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, code) => {
+    const placeholder = `@@CODE_BLOCK_${codeBlocks.length}@@`;
+    codeBlocks.push(code);
+    return placeholder;
+  });
+
+  // Escape HTML for the rest
+  md = md
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(
-      /```[^\n]*\n([\s\S]*?)```/g,
-      (_, code) => `<pre><code>${code.trimEnd()}</code></pre>`,
-    )
+    .replace(/>/g, "&gt;");
+
+  // Headers
+  md = md
     .replace(/^### (.+)$/gm, "<h3>$1</h3>")
     .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
-    .replace(/^&gt; (.+)$/gm, "<blockquote><p>$1</p></blockquote>")
-    .replace(/^---$/gm, "<hr>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
-    .replace(
-      /(\|.+\|\n)((?:\|[-: ]+\|)+\n)((?:\|.+\|\n?)*)/g,
-      (_, head, _sep, body) => {
-        const th = head
-          .trim()
-          .split("|")
-          .filter((c) => c.trim())
-          .map((c) => `<th>${c.trim()}</th>`)
-          .join("");
-        const rows = body
-          .trim()
-          .split("\n")
-          .filter(Boolean)
-          .map(
-            (r) =>
-              "<tr>" +
-              r
-                .split("|")
-                .filter((c) => c.trim())
-                .map((c) => `<td>${c.trim()}</td>`)
-                .join("") +
-              "</tr>",
-          )
-          .join("");
-        return `<table><thead><tr>${th}</tr></thead><tbody>${rows}</tbody></table>`;
-      },
-    )
-    .replace(/((?:^- .+\n?)+)/gm, (block) => {
-      const items = block
+    .replace(/^# (.+)$/gm, "<h1>$1</h1>");
+
+  // Blockquotes
+  md = md.replace(/^> (.+)$/gm, "<blockquote><p>$1</p></blockquote>");
+
+  // Horizontal rules
+  md = md.replace(/^---$/gm, "<hr>");
+
+  // Bold and italic (order matters)
+  md = md.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  md = md.replace(/\*(.+?)\*/g, "<em>$1</em>");
+
+  // Inline code
+  md = md.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  // Links
+  md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // Lists (unordered only, single-level)
+  md = md.replace(/(^- .+(?:\n- .+)*)/gm, (block) => {
+    const items = block
+      .trim()
+      .split("\n")
+      .map((line) => `<li>${line.slice(2).trim()}</li>`)
+      .join("");
+    return `<ul>${items}</ul>`;
+  });
+
+  // Tables (simple, header + separator + rows)
+  md = md.replace(
+    /(\|.+\|\n)(\|[-: ]+\|\n)((?:\|.+\|\n?)*)/g,
+    (_, head, _sep, body) => {
+      const th = head
+        .trim()
+        .split("|")
+        .filter(Boolean)
+        .map((c) => `<th>${c.trim()}</th>`)
+        .join("");
+      const rows = body
         .trim()
         .split("\n")
-        .map((l) => `<li>${l.slice(2)}</li>`)
+        .filter(Boolean)
+        .map(
+          (r) =>
+            "<tr>" +
+            r
+              .split("|")
+              .filter(Boolean)
+              .map((c) => `<td>${c.trim()}</td>`)
+              .join("") +
+            "</tr>"
+        )
         .join("");
-      return `<ul>${items}</ul>`;
-    });
+      return `<table><thead><tr>${th}</tr></thead><tbody>${rows}</tbody></table>`;
+    }
+  );
 
-  s = s
+  // Paragraphs: wrap everything not already wrapped in tags
+  md = md
     .split(/\n{2,}/)
     .map((chunk) => {
       const t = chunk.trim();
       if (!t) return "";
-      if (/^<(h[1-3]|ul|ol|pre|table|blockquote|hr)/.test(t)) return t;
+      if (/^<(h[1-3]|ul|ol|pre|table|blockquote|hr|code)/.test(t)) return t;
       return `<p>${t.replace(/\n/g, " ")}</p>`;
     })
     .join("\n");
 
-  return s;
+  // Restore code blocks
+  md = md.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, i) => {
+    const code = codeBlocks[i];
+    return `<pre><code>${code.trimEnd()}</code></pre>`;
+  });
+
+  return md;
 }
 
 // ── ENV IMPORTS ───────────────────────────────────
