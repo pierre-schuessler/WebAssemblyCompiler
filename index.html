@@ -5,509 +5,695 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WASM Assembler</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #1e1e1e;
+            --border: #3d3d3d;
+            --text: #d4d4d4;
+            --text-muted: #858585;
+            --text-ln: #5a5a5a;
+            --accent: #007acc;
+            --green: #4ec9b0;
+            --red: #f48771;
+            --yellow: #dcdcaa;
+            --scrollbar: #424242;
+            --font: 'Consolas', 'JetBrains Mono', 'Courier New', monospace;
         }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .container {
-            width: 100%;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            padding: 40px;
-        }
-        
-        h1 {
-            color: #667eea;
-            margin-bottom: 30px;
-            text-align: center;
-        }
-        
-        textarea {
-            width: 100%;
-            height: 300px;
-            padding: 15px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            font-size: 14px;
-            resize: vertical;
-            margin-bottom: 20px;
-        }
-        
-        textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        button {
-            width: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 15px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        
-        button:hover {
-            transform: translateY(-2px);
-        }
-        
-        .output {
-            margin-top: 30px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .output h3 {
-            color: #667eea;
-            margin-bottom: 10px;
-        }
-        
-        .binary {
-            font-family: 'Courier New', monospace;
+
+        html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; }
+        body { display: flex; flex-direction: column; }
+
+        /* title */
+        .titlebar {
+            height: 30px; min-height: 30px; flex-shrink: 0;
             background: #2d2d2d;
-            color: #f8f8f2;
-            padding: 15px;
-            border-radius: 6px;
-            word-break: break-all;
-            margin: 10px 0;
-            font-size: 13px;
-            line-height: 1.6;
+            display: flex; align-items: center; justify-content: center;
+            border-bottom: 1px solid #1a1a1a;
         }
-        
-        .result {
-            padding: 15px;
-            background: white;
-            border-radius: 6px;
-            margin-top: 10px;
+        .titlebar span { color: var(--text-muted); font-size: 12px; font-family: -apple-system,'Segoe UI',sans-serif; }
+
+        /* workspace */
+        .workspace { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* editor row */
+        .editor-row { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+
+        /* line numbers */
+        .line-numbers {
+            width: 48px; min-width: 48px; flex-shrink: 0;
+            padding: 8px 12px 8px 0;
+            background: var(--bg);
+            color: var(--text-ln);
+            font-size: 13px; line-height: 19px;
+            text-align: right;
+            user-select: none;
+            overflow: hidden;
         }
-        
-        .error {
-            color: #e74c3c;
-            padding: 15px;
-            background: #fee;
-            border-radius: 6px;
-            margin-top: 10px;
+        .line-number { display: block; height: 19px; }
+        .line-number.active { color: var(--text); }
+
+        /* editor */
+        .editor-wrap { flex: 1; overflow: auto; position: relative; }
+        .editor-wrap::-webkit-scrollbar { width: 10px; height: 10px; }
+        .editor-wrap::-webkit-scrollbar-track { background: transparent; }
+        .editor-wrap::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 5px; }
+
+        #code {
+            width: 100%; min-height: 100%;
+            padding: 8px 16px 8px 8px;
+            background: transparent; color: var(--text);
+            font-family: var(--font); font-size: 13px; line-height: 19px;
+            border: none; outline: none; resize: none;
+            caret-color: #fff; white-space: pre; overflow-wrap: normal; overflow-x: auto;
+            tab-size: 4; display: block;
         }
-        
-        .success {
-            color: #27ae60;
-            font-weight: 600;
+
+        /* activity bar */
+        .activity-bar {
+            width: 36px; min-width: 36px; flex-shrink: 0;
+            background: #333333;
+            border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; align-items: center;
+            padding-top: 4px; gap: 2px;
+        }
+        .activity-btn {
+            width: 32px; height: 32px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 4px; cursor: pointer; font-size: 17px;
+            color: var(--text-muted); user-select: none; position: relative;
+        }
+        .activity-btn:hover { color: var(--text); }
+        .activity-btn.active { color: var(--text); }
+        .activity-btn.active::before {
+            content: ''; position: absolute; left: -4px; top: 6px; bottom: 6px;
+            width: 2px; background: var(--text); border-radius: 2px;
+        }
+
+        /* side panel */
+        .side-panel {
+            width: 260px; min-width: 200px; flex-shrink: 0;
+            background: #252526; border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; overflow: hidden;
+            transition: width 0.12s ease;
+        }
+        .side-panel.collapsed { width: 0; min-width: 0; border-right: none; overflow: hidden; }
+        .side-panel-header {
+            height: 28px; min-height: 28px; flex-shrink: 0;
+            display: flex; align-items: center; padding: 0 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .side-panel-title {
+            font-size: 11px; font-family: -apple-system,'Segoe UI',sans-serif;
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
+            color: var(--text-muted); white-space: nowrap;
+        }
+        .side-panel-add {
+            margin-left: auto; width: 20px; height: 20px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; color: var(--text-muted); font-size: 18px; line-height: 1; border-radius: 3px;
+        }
+        .side-panel-add:hover { color: var(--text); background: rgba(255,255,255,0.07); }
+        .env-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+        .env-list::-webkit-scrollbar { width: 6px; }
+        .env-list::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+        .env-item {
+            padding: 5px 10px; display: flex; flex-direction: column; gap: 1px;
+            border-left: 2px solid transparent; position: relative; cursor: default;
+        }
+        .env-item:hover { background: rgba(255,255,255,0.04); }
+        .env-item.selected { background: rgba(0,122,204,0.15); border-left-color: var(--accent); }
+        .env-item-name { font-family: var(--font); font-size: 12px; color: var(--yellow); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .env-item-sig  { font-family: var(--font); font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .env-item-actions { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: none; gap: 2px; }
+        .env-item:hover .env-item-actions { display: flex; }
+        .env-action-btn {
+            width: 18px; height: 18px; border: none; background: none;
+            color: var(--text-muted); cursor: pointer; font-size: 12px;
+            display: flex; align-items: center; justify-content: center; border-radius: 3px;
+        }
+        .env-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.1); }
+        .env-action-btn.del:hover { color: var(--red); }
+        .env-empty { padding: 14px 12px; color: var(--text-muted); font-size: 12px; font-family: -apple-system,'Segoe UI',sans-serif; line-height: 1.5; }
+
+        /* env form */
+        .env-form {
+            border-top: 1px solid var(--border); padding: 10px;
+            display: flex; flex-direction: column; gap: 6px;
+            flex-shrink: 0; background: #1e1e1e;
+        }
+        .env-form.hidden { display: none; }
+        .env-form-title { font-size: 10px; font-family: -apple-system,'Segoe UI',sans-serif; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); }
+        .env-label { font-size: 10px; font-family: -apple-system,'Segoe UI',sans-serif; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .env-field { display: flex; flex-direction: column; gap: 2px; }
+        .env-input { background: #3c3c3c; border: 1px solid var(--border); color: var(--text); font-family: var(--font); font-size: 12px; padding: 4px 7px; border-radius: 3px; outline: none; width: 100%; }
+        .env-input:focus { border-color: var(--accent); }
+        .env-textarea { background: #3c3c3c; border: 1px solid var(--border); color: var(--text); font-family: var(--font); font-size: 12px; padding: 4px 7px; border-radius: 3px; outline: none; width: 100%; resize: vertical; min-height: 52px; line-height: 1.5; }
+        .env-textarea:focus { border-color: var(--accent); }
+        .env-form-hint { font-size: 10px; color: var(--text-muted); font-family: -apple-system,'Segoe UI',sans-serif; line-height: 1.4; }
+        .env-form-btns { display: flex; gap: 6px; }
+        .env-btn { flex: 1; padding: 4px 0; border: none; border-radius: 3px; font-size: 12px; font-family: -apple-system,'Segoe UI',sans-serif; cursor: pointer; font-weight: 500; }
+        .env-btn-primary { background: var(--accent); color: #fff; }
+        .env-btn-primary:hover { background: #1a8ad4; }
+        .env-btn-cancel { background: #3c3c3c; color: var(--text-muted); }
+        .env-btn-cancel:hover { color: var(--text); }
+
+        /* minimap */
+        .minimap {
+            width: 60px; min-width: 60px; flex-shrink: 0;
+            background: var(--bg);
+            border-left: 1px solid var(--border);
+            overflow: hidden; position: relative;
+        }
+        #minimapCanvas { position: absolute; left: 0; width: 100%; }
+        .minimap-viewport {
+            position: absolute; left: 0; right: 0;
+            background: rgba(255,255,255,0.07);
+            pointer-events: none;
+        }
+
+        /* panel */
+        .panel {
+            height: 220px; min-height: 80px; flex-shrink: 0;
+            background: var(--bg);
+            border-top: 1px solid var(--border);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        .panel-header {
+            height: 28px; min-height: 28px; flex-shrink: 0;
+            background: #252526;
+            display: flex; align-items: center; padding: 0 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .panel-title {
+            font-size: 11px; font-family: -apple-system,'Segoe UI',sans-serif;
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.7px;
+            color: var(--text);
+            border-bottom: 1px solid var(--accent); padding-bottom: 1px;
+        }
+
+        /* terminal */
+        .terminal-output {
+            flex: 1; overflow-y: auto;
+            padding: 6px 12px; line-height: 18px;
+        }
+        .terminal-output::-webkit-scrollbar { width: 8px; }
+        .terminal-output::-webkit-scrollbar-track { background: transparent; }
+        .terminal-output::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
+
+        .term-line { white-space: pre-wrap; word-break: break-all; min-height: 18px; }
+        .c-ok    { color: var(--green); }
+        .c-err   { color: var(--red); }
+        .c-info  { color: var(--accent); }
+        .c-muted { color: var(--text-muted); }
+        .c-hex   { color: #b5cea8; letter-spacing: 0.4px; }
+        .c-warn  { color: var(--yellow); }
+        .c-prompt{ color: var(--green); }
+
+        .terminal-input-row {
+            display: flex; align-items: center;
+            padding: 4px 12px;
+            border-top: 1px solid var(--border); flex-shrink: 0;
+        }
+        .term-prompt-label { color: var(--green); white-space: nowrap; user-select: none; }
+        #termInput {
+            flex: 1; background: none; border: none; outline: none;
+            color: var(--text); font-family: var(--font); font-size: 13px;
+            caret-color: #fff; padding: 2px 4px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🔧 WASM Assembler</h1>
-        
-        <textarea id="code"></textarea>
-        
-        <button onclick="assembleAndRun()">Assemble & Run</button>
-        
-        <div id="output"></div>
+
+<div class="titlebar"><span>WebAssembly Compiler</span></div>
+
+<div class="workspace">
+    <div class="editor-row">
+        <div class="activity-bar">
+            <div class="activity-btn" id="activityEnv" title="Env Imports" onclick="toggleSidePanel()">⚙</div>
+        </div>
+        <div class="side-panel collapsed" id="sidePanel">
+            <div class="side-panel-header">
+                <span class="side-panel-title">Env Imports</span>
+                <span class="side-panel-add" title="Add import" onclick="openForm()">+</span>
+            </div>
+            <div class="env-list" id="envList"></div>
+            <div class="env-form hidden" id="envForm">
+                <div class="env-form-title" id="envFormTitle">New Import</div>
+                <div class="env-field">
+                    <span class="env-label">Name</span>
+                    <input class="env-input" id="envName" placeholder="e.g. pow" spellcheck="false"/>
+                </div>
+                <div class="env-field">
+                    <span class="env-label">Signature &nbsp;<span style="font-size:9px;text-transform:none;letter-spacing:0">(inputs =&gt; outputs)</span></span>
+                    <input class="env-input" id="envSig" placeholder="i32 i32 => i32" spellcheck="false"/>
+                </div>
+                <div class="env-field">
+                    <span class="env-label">JS Body &nbsp;<span style="font-size:9px;text-transform:none;letter-spacing:0">(args: a, b, c…)</span></span>
+                    <textarea class="env-textarea" id="envBody" placeholder="return a ** b;"></textarea>
+                </div>
+                <div class="env-form-hint">Args are named a, b, c, … based on input count.</div>
+                <div class="env-form-btns">
+                    <button class="env-btn env-btn-cancel" onclick="closeForm()">Cancel</button>
+                    <button class="env-btn env-btn-primary" onclick="saveEnv()">Save</button>
+                </div>
+            </div>
+        </div>
+        <div class="line-numbers" id="lineNumbers"><span class="line-number active">1</span></div>
+        <div class="editor-wrap" id="editorWrap">
+            <textarea id="code" spellcheck="false" autocorrect="off" autocapitalize="off"
+placeholder="export add i32 i32 => i32
+get 0
+get 1
+add i32
+return"></textarea>
+        </div>
+        <div class="minimap" id="minimapContainer">
+            <canvas id="minimapCanvas"></canvas>
+            <div class="minimap-viewport" id="minimapViewport"></div>
+        </div>
     </div>
-    
-    <script>
 
-        function encodeULEB128(value) {
-            const bytes = [];
-            do {
-                let byte = value & 0x7F;
-                value >>>= 7;
-                if (value !== 0) byte |= 0x80;
-                bytes.push(byte);
-            } while (value !== 0);
-            return bytes;
+    <div class="panel" id="panel">
+        <div class="panel-header"><span class="panel-title">Terminal</span></div>
+        <div class="terminal-output" id="termOutput"></div>
+        <div class="terminal-input-row">
+            <span class="term-prompt-label">wasm&nbsp;$&nbsp;</span>
+            <input type="text" id="termInput" autocomplete="off" spellcheck="false" placeholder="make, build, run, hex, clear, help…"/>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── COMPILER ──────────────────────────────────────
+
+function encodeULEB128(v) {
+    const b=[];
+    do { let byte=v&0x7F; v>>>=7; if(v!==0)byte|=0x80; b.push(byte); } while(v!==0);
+    return b;
+}
+
+function encodeWasmInstruction(words) {
+    let type="i32";
+    const validTypes=["empty","i32","i64","f32","f64"];
+    if(words.length>1&&validTypes.includes(words[1])){type=words[1];words.splice(1,1);}
+    const op={
+        get:0x20,return:0x0F,drop:0x1A,call:0x10,if:0x04,else:0x05,end:0x0B,
+        add:{i32:0x6A,i64:0x7C,f32:0x92,f64:0xA0},
+        sub:{i32:0x6B,i64:0x7D,f32:0x93,f64:0xA1},
+        mul:{i32:0x6C,i64:0x7E,f32:0x94,f64:0xA2},
+        div:{i32:0x6D,i64:0x7F,f32:0x95,f64:0xA3},
+        const:{i32:0x41,i64:0x42,f32:0x43,f64:0x44}
+    };
+    const bt={empty:0x40,i32:0x7F,i64:0x7E,f32:0x7D,f64:0x7C};
+    switch(words[0]){
+        case"get":    return[op.get,...encodeULEB128(Number(words[1]))];
+        case"const":  return[op.const[type],...encodeULEB128(Number(words[1]))];
+        case"drop":   return[op.drop];
+        case"call":   return[op.call,...encodeULEB128(Number(words[1]))];
+        case"if":     return[op.if,bt[type]];
+        case"else":   return[op.else];
+        case"end":    return[op.end];
+        case"add":case"sub":case"mul":case"div": return[op[words[0]][type]];
+        case"return": return[op.return];
+        default:      return[Number(words[0])];
+    }
+}
+
+function compile(code) {
+    const lines=code.split('\n').map(l=>l.trim()).filter(l=>l.length>0&&!l.startsWith(';'));
+    if(!lines.length) return null;
+    const bytes=[0x00,0x61,0x73,0x6D,0x01,0x00,0x00,0x00];
+    let types=[],functions=[],imports=[],exports=[],codes=[],tmp=[];
+    const tmap={i32:0x7F,i64:0x7E,f32:0x7D,f64:0x7C};
+
+    for(const line of lines){
+        const words=line.split(' ').filter(p=>p.length>0);
+        if(!words.length) continue;
+        if(words[0]==='export'){
+            if(tmp.length){codes.push(tmp);tmp=[];}
+            let inputs=[],outputs=[],mode="inputs";
+            for(let j=2;j<words.length;j++){
+                if(words[j]==='=>'){mode="outputs";continue;}
+                if(tmap[words[j]])(mode==="inputs"?inputs:outputs).push(tmap[words[j]]);
+            }
+            types.push({inputs,outputs});functions.push(types.length-1);exports.push({name:words[1]});
+        } else if(words[0]==='import'){
+            if(tmp.length){codes.push(tmp);tmp=[];}
+            let inputs=[],outputs=[],mode="inputs";
+            for(let j=3;j<words.length;j++){
+                if(words[j]==='=>'){mode="outputs";continue;}
+                if(tmap[words[j]])(mode==="inputs"?inputs:outputs).push(tmap[words[j]]);
+            }
+            types.push({inputs,outputs});imports.push({module:words[1],name:words[2],typeIndex:types.length-1});
+        } else { tmp.push(...encodeWasmInstruction(words)); }
+    }
+    if(tmp.length) codes.push(tmp);
+
+    // type section
+    bytes.push(0x01);
+    let tsl=1;types.forEach(t=>{tsl+=1+1+t.inputs.length+1+t.outputs.length;});
+    bytes.push(...encodeULEB128(tsl),types.length);
+    types.forEach(t=>{bytes.push(0x60,t.inputs.length,...t.inputs,t.outputs.length,...t.outputs);});
+
+    // import section
+    bytes.push(0x02);
+    let isl=1;imports.forEach(i=>{isl+=1+i.module.length+1+i.name.length+2;});
+    bytes.push(...encodeULEB128(isl),imports.length);
+    imports.forEach(imp=>{
+        bytes.push(imp.module.length,...[...imp.module].map(c=>c.charCodeAt(0)));
+        bytes.push(imp.name.length,...[...imp.name].map(c=>c.charCodeAt(0)));
+        bytes.push(0x00,...encodeULEB128(imp.typeIndex));
+    });
+
+    // function section
+    bytes.push(0x03,...encodeULEB128(1+functions.length),functions.length);
+    functions.forEach(f=>bytes.push(...encodeULEB128(f)));
+
+    // export section
+    if(exports.length){
+        bytes.push(0x07);
+        let esl=1;exports.forEach(e=>{esl+=1+e.name.length+2;});
+        bytes.push(...encodeULEB128(esl),exports.length);
+        exports.forEach((e,idx)=>{
+            bytes.push(e.name.length,...[...e.name].map(c=>c.charCodeAt(0)));
+            bytes.push(0x00,...encodeULEB128(idx+imports.length));
+        });
+    }
+
+    // code section
+    bytes.push(0x0A);
+    const bodies=codes.map(c=>{const b=[0x00,...c,0x0B];return[...encodeULEB128(b.length),...b];});
+    let csl=1;bodies.forEach(b=>csl+=b.length);
+    bytes.push(...encodeULEB128(csl),codes.length);
+    bodies.forEach(b=>bytes.push(...b));
+    return new Uint8Array(bytes);
+}
+
+// ── ENV IMPORTS PANEL ─────────────────────────────
+
+let envImports = [
+    { name: 'pow', sig: 'i32 i32 => i32', body: 'return Math.pow(a, b)|0;' },
+    { name: 'log', sig: 'i32 => i32',     body: 'console.log(a); return a;' },
+];
+let editingIdx = null;
+
+function toggleSidePanel() {
+    const panel = document.getElementById('sidePanel');
+    const btn   = document.getElementById('activityEnv');
+    const collapsed = panel.classList.toggle('collapsed');
+    btn.classList.toggle('active', !collapsed);
+}
+
+function renderEnvList() {
+    const list = document.getElementById('envList');
+    if (!envImports.length) {
+        list.innerHTML = '<div class="env-empty">No env imports.<br>Click + to add one.</div>';
+        return;
+    }
+    list.innerHTML = envImports.map((e, i) => {
+        const sig = e.sig || '() => ()';
+        return `<div class="env-item" onclick="selectEnv(${i})">
+            <div class="env-item-name">${esc(e.name)}</div>
+            <div class="env-item-sig">${esc(sig)}</div>
+            <div class="env-item-actions">
+                <button class="env-action-btn" title="Edit" onclick="event.stopPropagation();editEnv(${i})">✎</button>
+                <button class="env-action-btn del" title="Delete" onclick="event.stopPropagation();deleteEnv(${i})">✕</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function selectEnv(i) {
+    document.querySelectorAll('.env-item').forEach((el,j)=>el.classList.toggle('selected', j===i));
+}
+
+function openForm(idx=null) {
+    editingIdx = idx;
+    const form = document.getElementById('envForm');
+    document.getElementById('envFormTitle').textContent = idx===null ? 'New Import' : 'Edit Import';
+    if (idx !== null) {
+        const e = envImports[idx];
+        document.getElementById('envName').value = e.name;
+        document.getElementById('envSig').value  = e.sig;
+        document.getElementById('envBody').value = e.body;
+    } else {
+        document.getElementById('envName').value = '';
+        document.getElementById('envSig').value  = '';
+        document.getElementById('envBody').value = '';
+    }
+    form.classList.remove('hidden');
+    document.getElementById('envName').focus();
+}
+
+function closeForm() {
+    document.getElementById('envForm').classList.add('hidden');
+    editingIdx = null;
+}
+
+function editEnv(i) { openForm(i); }
+
+function deleteEnv(i) {
+    envImports.splice(i, 1);
+    renderEnvList();
+    closeForm();
+    print(`<span class="c-muted">env import removed</span>`);
+    print('');
+}
+
+function saveEnv() {
+    const name = document.getElementById('envName').value.trim();
+    const sig  = document.getElementById('envSig').value.trim();
+    const body = document.getElementById('envBody').value.trim();
+    if (!name) { document.getElementById('envName').focus(); return; }
+
+    const entry = { name, sig, body };
+    if (editingIdx !== null) {
+        envImports[editingIdx] = entry;
+    } else {
+        envImports.push(entry);
+    }
+    renderEnvList();
+    closeForm();
+    print(`<span class="c-muted">env import saved: </span><span class="c-ok">${esc(name)}</span>`);
+    print('');
+}
+
+function buildEnvObject() {
+    const env = {};
+    const argNames = ['a','b','c','d','e','f','g','h'];
+    for (const imp of envImports) {
+        // count inputs from sig
+        const parts = imp.sig.split('=>')[0].trim().split(/\s+/).filter(Boolean);
+        const argCount = parts.length;
+        const args = argNames.slice(0, argCount);
+        try {
+            env[imp.name] = new Function(...args, imp.body || 'return 0;');
+        } catch(err) {
+            throw new Error(`env.${imp.name}: ${err.message}`);
         }
+    }
+    return env;
+}
 
-        function encodeWasmInstruction(words) {
-            // Mapping of WASM opcodes for different types
-            // Take type from second word if exists valid type
-            let type = "i32"; // default type
-            if (words.length > 1) {
-                console.log(words)
-                const validTypes = ["empty", "i32", "i64", "f32", "f64"];
-                if (validTypes.includes(words[1])) {
-                    type = words[1];
-                    words.splice(1, 1); // remove type from words
+renderEnvList();
+
+
+
+const termOutput=document.getElementById('termOutput');
+const termInput=document.getElementById('termInput');
+let cmdHistory=[],histIdx=-1,lastBinary=null,lastInstance=null;
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function print(html){
+    const d=document.createElement('div');
+    d.className='term-line';d.innerHTML=html;
+    termOutput.appendChild(d);
+    termOutput.scrollTop=termOutput.scrollHeight;
+}
+
+print(`<span class="c-info">WASM Assembler ready.</span>`);
+print(`<span class="c-muted">make · build · run &lt;fn&gt; [args] · hex · clear · help</span>`);
+print('');
+
+async function runCommand(raw){
+    const cmd=raw.trim();
+    if(!cmd) return;
+    cmdHistory.unshift(cmd);histIdx=-1;
+    print(`<span class="c-prompt">wasm $ </span>${esc(cmd)}`);
+    const parts=cmd.split(/\s+/),verb=parts[0].toLowerCase();
+
+    if(verb==='help'){
+        print(`<span class="c-muted">  make          — compile &amp; test with (5, 3)</span>`);
+        print(`<span class="c-muted">  build         — compile only</span>`);
+        print(`<span class="c-muted">  run fn [args] — call exported function</span>`);
+        print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
+        print(`<span class="c-muted">  clear         — clear terminal</span>`);
+
+    } else if(verb==='clear'){
+        termOutput.innerHTML='';
+
+    } else if(verb==='build'||verb==='make'){
+        const code=document.getElementById('code').value;
+        if(!code.trim()){print(`<span class="c-err">✗ editor is empty</span>`);return;}
+        print(`<span class="c-muted">compiling…</span>`);
+        try{
+            const binary=compile(code);
+            if(!binary) throw new Error('compile() returned null');
+            lastBinary=binary;
+            print(`<span class="c-ok">✓ ${binary.length} bytes</span>`);
+            let hex='';
+            const lim=Math.min(binary.length,48);
+            for(let i=0;i<lim;i++) hex+=binary[i].toString(16).padStart(2,'0').toUpperCase()+' ';
+            if(binary.length>48) hex+=`<span class="c-muted">… +${binary.length-48}</span>`;
+            print(`<span class="c-hex">${hex}</span>`);
+
+            const mod=await WebAssembly.compile(binary);
+            lastInstance=await WebAssembly.instantiate(mod,{ env: buildEnvObject() });
+            const exps=Object.keys(lastInstance.exports);
+            print(`<span class="c-muted">exports: </span><span class="c-ok">${exps.map(esc).join(', ')}</span>`);
+
+            if(verb==='make'){
+                for(const fn of exps){
+                    if(typeof lastInstance.exports[fn]!=='function') continue;
+                    try{
+                        const r=lastInstance.exports[fn](5,3);
+                        print(`<span class="c-muted">  ${esc(fn)}(5, 3) → </span><span class="c-ok">${r}</span>`);
+                    }catch(e){print(`<span class="c-muted">  ${esc(fn)}(5, 3) → </span><span class="c-err">${esc(e.message)}</span>`);}
                 }
             }
-            
-            const opcodes = {
-                "get": 0x20,        // local.get (same for all types)
-                "return": 0x0F,     // return
-                "drop": 0x1A,      // drop
-                "call": 0x10,      // call
-                "if": 0x04,        // if
-                "else": 0x05,      // else
-                "end": 0x0B,       // end
-                "add": { i32: 0x6A, i64: 0x7C, f32: 0x92, f64: 0xA0 },
-                "sub": { i32: 0x6B, i64: 0x7D, f32: 0x93, f64: 0xA1 },
-                "mul": { i32: 0x6C, i64: 0x7E, f32: 0x94, f64: 0xA2 },
-                "div": { i32: 0x6D, i64: 0x7F, f32: 0x95, f64: 0xA3 }, // i32/i64 are signed div
-                "const": { i32: 0x41, i64: 0x42, f32: 0x43, f64: 0x44 }
-           
-            };
-            blocktypes = {empty: 0x40, i32: 0x7F, i64: 0x7E, f32: 0x7D, f64: 0x7C};
+        }catch(e){print(`<span class="c-err">✗ ${esc(e.message)}</span>`);}
 
-            let bytes = [];
+    } else if(verb==='run'){
+        if(!lastInstance){print(`<span class="c-warn">⚠ run make first</span>`);return;}
+        const fn=parts[1],args=parts.slice(2).map(Number);
+        if(!fn){print(`<span class="c-err">usage: run &lt;fn&gt; [args]</span>`);return;}
+        const func=lastInstance.exports[fn];
+        if(!func||typeof func!=='function'){print(`<span class="c-err">✗ no export "${esc(fn)}"</span>`);return;}
+        try{
+            const r=func(...args);
+            print(`<span class="c-muted">${esc(fn)}(${args.join(', ')}) → </span><span class="c-ok">${r}</span>`);
+        }catch(e){print(`<span class="c-err">✗ ${esc(e.message)}</span>`);}
 
-            switch(words[0]) {
-                case "get":
-                    bytes.push(opcodes.get);
-                    bytes.push(...encodeULEB128(Number(words[1])));
-                    break;
-                case "const":
-                    bytes.push(opcodes.const[type]);
-                    bytes.push(...encodeULEB128(Number(words[1])));
-                    break;
-                case "drop":
-                    bytes.push(opcodes.drop);
-                    break;
-                case "call":
-                    bytes.push(opcodes.call);
-                    bytes.push(...encodeULEB128(Number(words[1])));
-                    break;
-                case "if":
-                    bytes.push(opcodes.if);
-                    bytes.push(blocktypes[type]);
-                    console.log("Using blocktype"  + blocktypes[type] ,"for type" + type)
-                    break;
-                case "else":
-                    bytes.push(opcodes.else);
-                    break;
-                case "end":
-                    bytes.push(opcodes.end);
-                    break;
-                case "add":
-                case "sub":
-                case "mul":
-                case "div":
-                    bytes.push(opcodes[words[0]][type]);
-                    break;
-                case "return":
-                    bytes.push(opcodes.return);
-                    break;
-                default:
-                    bytes.push(Number(words[0]));
-            }
-
-            return bytes;
+    } else if(verb==='hex'){
+        if(!lastBinary){print(`<span class="c-warn">⚠ run build first</span>`);return;}
+        let row='';
+        for(let i=0;i<lastBinary.length;i++){
+            row+=lastBinary[i].toString(16).padStart(2,'0').toUpperCase()+' ';
+            if((i+1)%16===0){print(`<span class="c-hex">${row}</span>`);row='';}
         }
+        if(row) print(`<span class="c-hex">${row}</span>`);
 
-        
-        function compile(code) { // This should parse the code and return a Uint8Array of WASM binary
+    } else {
+        print(`<span class="c-err">✗ unknown command: ${esc(verb)}</span>`);
+    }
+    print('');
+}
 
-            // turn code string into array of lines
-            const lines = code.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-            if (lines.length === 0) return null;
-            let compilationIndex = 0;
-            
-            const bytes = [];
-    
-            // Magic number
-            bytes.push(0x00, 0x61, 0x73, 0x6D);
-            
-            // Version
-            bytes.push(0x01, 0x00, 0x00, 0x00);
+termInput.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){const v=termInput.value;termInput.value='';runCommand(v);}
+    else if(e.key==='ArrowUp'){e.preventDefault();if(histIdx<cmdHistory.length-1){histIdx++;termInput.value=cmdHistory[histIdx];}}
+    else if(e.key==='ArrowDown'){e.preventDefault();if(histIdx>0){histIdx--;termInput.value=cmdHistory[histIdx];}else{histIdx=-1;termInput.value='';}}
+});
+document.getElementById('panel').addEventListener('click',()=>termInput.focus());
 
-            
-            let types = []
-            let functions = []
-            let imports = []
-            let exports = []
-            let codes = []
-            let TempCode = []
+// ── EDITOR ────────────────────────────────────────
 
-            for (let i = 0; i < lines.length; i++){
-                // split line in words
-                let words = lines[i].split(' ').filter(p => p.length > 0);
-                if (words.length === 0) continue;
-                console.log(words)
-                if (words[0] == "export"){
-                    if (TempCode.length > 0){
-                        codes.push(TempCode);
-                        TempCode = [];
-                    }
-                    // get the input and outputs in format export add i32 i32 => i32 as binaries
-                    let funcName = words[1];
-                    let inputs = [];
-                    let outputs = [];
-                    let mode = "inputs"
-                    for (let j = 2; j < words.length; j++){
-                        if (words[j] == "=>"){
-                            mode = "outputs";
-                            continue;
-                        }
-                        if (mode == "inputs"){
-                            if (words[j] == "i32") inputs.push(0x7F);
-                            else if (words[j] == "i64") inputs.push(0x7E);
-                            else if (words[j] == "f32") inputs.push(0x7D);
-                            else if (words[j] == "f64") inputs.push(0x7C);
-                        } else {
-                            if (words[j] == "i32") outputs.push(0x7F);
-                            else if (words[j] == "i64") outputs.push(0x7E);
-                            else if (words[j] == "f32") outputs.push(0x7D);
-                            else if (words[j] == "f64") outputs.push(0x7C);
-                        }
-                    }
-                    types.push({"inputs": inputs, "outputs": outputs});
-                    functions.push(types.length - 1); // function uses the last type
-                    exports.push({"name": funcName});
-                }
-                else if (words[0] == "import"){
-                    // import math pow i32 i32 => i32
-                    console.log("import")
-                    if (TempCode.length > 0){
-                        codes.push(TempCode);
-                        TempCode = [];
-                    }
-                    let moduleName = words[1];
-                    let funcName = words[2];
-                    let inputs = [];
-                    let outputs = [];
-                    let mode = "inputs"
-                    for (let j = 3; j < words.length; j++){
-                        if (words[j] == "=>"){
-                            mode = "outputs";
-                            continue;
-                        }
-                        if (mode == "inputs"){
-                            if (words[j] == "i32") inputs.push(0x7F);
-                            else if (words[j] == "i64") inputs.push(0x7E);
-                            else if (words[j] == "f32") inputs.push(0x7D);
-                            else if (words[j] == "f64") inputs.push(0x7C);
-                        } else {
-                            if (words[j] == "i32") outputs.push(0x7F);
-                            else if (words[j] == "i64") outputs.push(0x7E);
-                            else if (words[j] == "f32") outputs.push(0x7D);
-                            else if (words[j] == "f64") outputs.push(0x7C);
-                        }
-                    }
-                    types.push({"inputs": inputs, "outputs": outputs});
-                    imports.push({"module": moduleName, "name": funcName, "typeIndex": types.length - 1});
-                    console.log(imports)
+const codeEl=document.getElementById('code');
+const lineNums=document.getElementById('lineNumbers');
+const editorWrap=document.getElementById('editorWrap');
 
-                }
-                else {// add line of code to the end of the last function in  the code
-                    TempCode.push(...encodeWasmInstruction(words)); // second word is type, should be removed from words argument
-                }
-                
-            }
-            if (TempCode.length > 0){
-                codes.push(TempCode);
-                TempCode = [];
-            }
-            console.log(types, functions, imports, exports, codes);
-            
-            // TYPE SECTION
-            bytes.push(0x01); // section id
+function getCursorLine(){
+    return codeEl.value.substring(0,codeEl.selectionStart).split('\n').length;
+}
 
-            // Calculate length
-            let typesSectionLength = 1; // 1 byte for types.length
-            types.forEach(t => {
-                typesSectionLength += 1; // 0x60 func type marker
-                typesSectionLength += 1; // inputs.length
-                typesSectionLength += t.inputs.length; // actual input types
-                typesSectionLength += 1; // outputs.length
-                typesSectionLength += t.outputs.length; // actual output types
-            });
+function updateLineNumbers(){
+    const lines=codeEl.value.split('\n');
+    const cur=getCursorLine();
+    let html='';
+    for(let i=1;i<=lines.length;i++) html+=`<span class="line-number${i===cur?' active':''}">${i}</span>`;
+    lineNums.innerHTML=html;
+    lineNums.scrollTop=editorWrap.scrollTop;
+    updateMinimap();
+}
 
-            bytes.push(...encodeULEB128(typesSectionLength)); // section length
-            bytes.push(types.length); // number of types
-            types.forEach(t => {
-                bytes.push(0x60); // func type
-                bytes.push(t.inputs.length); // number of params
-                t.inputs.forEach(p => bytes.push(p)); // param types
-                bytes.push(t.outputs.length); // number of results
-                t.outputs.forEach(r => bytes.push(r)); // result types
-            });
+editorWrap.addEventListener('scroll',()=>{ lineNums.scrollTop=editorWrap.scrollTop; updateMinimap(); });
+codeEl.addEventListener('input',updateLineNumbers);
+codeEl.addEventListener('keyup',updateLineNumbers);
+codeEl.addEventListener('click',updateLineNumbers);
+codeEl.addEventListener('keydown',e=>{
+    if(e.key==='Tab'){
+        e.preventDefault();
+        const s=codeEl.selectionStart,end=codeEl.selectionEnd;
+        codeEl.value=codeEl.value.substring(0,s)+'    '+codeEl.value.substring(end);
+        codeEl.selectionStart=codeEl.selectionEnd=s+4;
+        updateLineNumbers();
+    }
+    if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){
+        e.preventDefault();runCommand('make');termInput.focus();
+    }
+});
 
-            // IMPORT SECTION
-            bytes.push(0x02); // section id
-            // calculate length
-            let importsSectionLength = 1; // 1 byte for imports.length
-            imports.forEach(imp => {
-                importsSectionLength += 1; // module name length
-                importsSectionLength += imp.module.length; // module name chars
-                importsSectionLength += 1; // func name length
-                importsSectionLength += imp.name.length; // func name chars
-                importsSectionLength += 1; // import kind (0x00)
-                importsSectionLength += 1; // type index
-            });
-            bytes.push(...encodeULEB128(importsSectionLength)); // section length
-            bytes.push(imports.length); // number of imports
-            imports.forEach(imp => {
-                bytes.push(imp.module.length); // module name length
-                for (let j = 0; j < imp.module.length; j++) {
-                    bytes.push(imp.module.charCodeAt(j)); // module name chars
-                }
-                bytes.push(imp.name.length); // func name length
-                for (let j = 0; j < imp.name.length; j++) {
-                    bytes.push(imp.name.charCodeAt(j)); // func name chars
-                }
-                bytes.push(0x00); // import kind: function
-                bytes.push(...encodeULEB128(imp.typeIndex)); // type index
-            });
-            
-            
-            // FUNCTION SECTION
-            bytes.push(0x03); // section id
-            bytes.push(...encodeULEB128(1 + functions.length)); // section length
-            bytes.push(functions.length); // number of functions
-            functions.forEach(f => bytes.push(...encodeULEB128(f))); // function type indices
+// ── MINIMAP ───────────────────────────────────────
+// Each line = exactly 2px tall, 1px gap.
+// Panel scrolls so cursor line stays centred.
 
-            if (exports.length != 0){
-                // EXPORT SECTION
-                bytes.push(0x07); // section id
+const minimapCanvas=document.getElementById('minimapCanvas');
+const minimapViewport=document.getElementById('minimapViewport');
+const minimapContainer=document.getElementById('minimapContainer');
+const LINE_PX=2, LINE_GAP=1, LINE_STRIDE=LINE_PX+LINE_GAP;
 
-                // Calculate length: 1 byte for count + each export entry
-                let exportsSectionLength = 1; // 1 byte for exports.length
-                exports.forEach((exp, idx) => {
-                    exportsSectionLength += 1; // name length byte
-                    exportsSectionLength += exp.name.length; // name characters
-                    exportsSectionLength += 1; // export kind (0x00)
-                    exportsSectionLength += 1; // function index
-                });
+updateLineNumbers();
 
-                bytes.push(...encodeULEB128(exportsSectionLength)); // section length
-                bytes.push(exports.length); // number of exports
-                exports.forEach((exp, idx) => {
-                    bytes.push(exp.name.length); // name length
-                    for (let j = 0; j < exp.name.length; j++) {
-                        bytes.push(exp.name.charCodeAt(j)); // name chars
-                    }
-                    bytes.push(0x00); // export kind: function
-                    bytes.push(...encodeULEB128(idx + imports.length)); // function index
-                });
-            }
-            
-            
-            // CODE SECTION
-            bytes.push(0x0A); // section id
+function updateMinimap(){
+    const lines=codeEl.value.split('\n');
+    const n=lines.length;
+    const W=minimapContainer.offsetWidth;
+    const totalH=n*LINE_STRIDE;
 
-            // Calculate length: 1 byte for count + each function body
-            // Body sizes can now be multi-byte due to LEB-128, so we encode each body
-            // first and measure, rather than calculating in advance
-            const encodedBodies = codes.map(code => {
-                const body = [];
-                body.push(0x00); // local decl count
-                code.forEach(op => body.push(op)); // function body
-                body.push(0x0B); // end
-                const sizeBytes = encodeULEB128(body.length);
-                return [...sizeBytes, ...body];
-            });
+    minimapCanvas.width=W;
+    minimapCanvas.height=totalH;
+    minimapCanvas.style.width=W+'px';
+    minimapCanvas.style.height=totalH+'px';
 
-            let codesSectionLength = 1; // 1 byte for codes.length
-            encodedBodies.forEach(b => codesSectionLength += b.length);
+    const ctx=minimapCanvas.getContext('2d');
+    ctx.clearRect(0,0,W,totalH);
 
-            bytes.push(...encodeULEB128(codesSectionLength)); // section length
-            bytes.push(codes.length); // number of functions
-            encodedBodies.forEach(b => b.forEach(byte => bytes.push(byte)));
+    lines.forEach((line,i)=>{
+        if(!line.trim()) return;
+        const alpha=Math.min(0.7,0.2+line.trim().length*0.015);
+        ctx.fillStyle=`rgba(212,212,212,${alpha})`;
+        const w=Math.min(W-4,line.length*1.4);
+        ctx.fillRect(2,i*LINE_STRIDE,w,LINE_PX);
+    });
 
-            console.log(bytes);
-            // Convert to Uint8Array
-            return new Uint8Array(bytes);
-        }
-        
-        async function assembleAndRun() {
-            const code = document.getElementById('code').value;
-            const output = document.getElementById('output');
-            
-            if (!code.trim()) {
-                output.innerHTML = '<div class="output"><p style="color: #e74c3c;">Please enter some code.</p></div>';
-                return;
-            }
-            
-            try {
-                // Compile the code to binary
-                const binary = compile(code);
-                
-                if (!binary) {
-                    output.innerHTML = `
-                        <div class="output">
-                            <div class="error">⚠️ Compiler not yet implemented. The compile() function needs to be filled in.</div>
-                        </div>
-                    `;
-                    return;
-                }
-                
-                // Display the binary
-                let binaryHex = '';
-                for (let i = 0; i < binary.length; i++) {
-                    if (i > 0 && i % 16 === 0) binaryHex += '\n';
-                    binaryHex += binary[i].toString(16).padStart(2, '0').toUpperCase() + ' ';
-                }
-                
-                // Create and instantiate the module
-                const module = await WebAssembly.compile(binary);
-                const instance = await WebAssembly.instantiate(module, {
-                    env: {
-                        pow: (x, y) => x ** y,
-                        log: (x) => { console.log("Log from WASM:", x); return x; }
-                    }
-                });
-                
-                // Get exported functions
-                const exports = Object.keys(instance.exports);
-                
-                let resultHTML = '<div class="result"><p class="success">✓ Module compiled and instantiated successfully!</p>';
-                resultHTML += '<p><strong>Exported functions:</strong> ' + exports.join(', ') + '</p>';
-                
-                for (const funcName of exports) {
-                    const func = instance.exports[funcName];
-                    
-                    if (typeof func === 'function') {
-                        try {
-                            const result = func(5, 3);
-                            resultHTML += `<p><strong>Test call ${funcName}(5, 3):</strong> ${result}</p>`;
-                        } catch (e) {
-                            resultHTML += `<p><strong>Test call ${funcName}:</strong> ${e.message}</p>`;
-                        }
-                    }
-                }
-                
-                resultHTML += '</div>';
-                
-                output.innerHTML = `
-                    <div class="output">
-                        <h3>Binary Output (${binary.length} bytes):</h3>
-                        <div class="binary">${binaryHex}</div>
-                        
-                        <h3>Execution Result:</h3>
-                        ${resultHTML}
-                    </div>
-                `;
-                
-            } catch (error) {
-                output.innerHTML = `
-                    <div class="output">
-                        <div class="error">
-                            <strong>Error:</strong> ${error.message}
-                        </div>
-                    </div>
-                `;
-            }
-        }
-    </script>
+    // viewport band
+    const containerH=minimapContainer.offsetHeight;
+    const editorH=editorWrap.offsetHeight;
+    const contentH=codeEl.scrollHeight||editorH;
+    const visibleRatio=Math.min(1,editorH/contentH);
+    const vpH=Math.max(6,Math.round(totalH*visibleRatio));
+
+    // cursor line
+    const curLine=getCursorLine();
+    const cursorY=(curLine-1)*LINE_STRIDE;
+
+    // scroll minimap so cursor line is centred in the container
+    let offsetTop=cursorY-containerH/2;
+    offsetTop=Math.max(0,Math.min(totalH-containerH,offsetTop));
+
+    minimapCanvas.style.top=(-offsetTop)+'px';
+
+    // viewport band position (relative to canvas position)
+    const scrollRatio=contentH>editorH ? editorWrap.scrollTop/(contentH-editorH) : 0;
+    const vpTop=scrollRatio*(totalH-vpH)-offsetTop;
+    minimapViewport.style.top=vpTop+'px';
+    minimapViewport.style.height=vpH+'px';
+}
+
+window.addEventListener('resize',updateMinimap);
+setTimeout(updateMinimap,50);
+</script>
 </body>
 </html>
