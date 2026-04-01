@@ -243,7 +243,21 @@ function encodeWasmInstruction(words) {
 }
 
 
+
+
 const TYPEMAP = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
+
+function preprocess(words, tmp){
+    const resolved = [...words];
+    if (["get", "set", "tee"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
+        const paramCount = types[types.length - 1].inputs.length;
+        const idx = tmp.locals.findIndex(([name]) => name === resolved[1]);
+        if (idx === -1) throw new Error(`Unknown local: '${resolved[1]}'`);
+        resolved[1] = String(paramCount + idx);
+    }
+    return resolved;
+}
+
 
 export function compile(code) {
 
@@ -320,14 +334,8 @@ export function compile(code) {
       default: {
         if (tmp) {
             // resolve named locals to their index
-            const resolved = [...words];
-            if (["get", "set", "tee"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
-            const paramCount = types[types.length - 1].inputs.length;
-            const idx = tmp.locals.findIndex(([name]) => name === resolved[1]);
-            if (idx === -1) throw new Error(`Unknown local: '${resolved[1]}'`);
-            resolved[1] = String(paramCount + idx);
-            }
-            tmp.binary.push(...encodeWasmInstruction(resolved));
+            
+            tmp.binary.push(...encodeWasmInstruction(preprocess(words, tmp)));
         }
         break;
         }
