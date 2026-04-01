@@ -367,8 +367,8 @@ async function runCommand(raw) {
   } else if (verb === "build" || verb === "make") {
     const code = document.getElementById("code").value;
     if (!code.trim()) {
-      print(`<span class="c-err">✗ editor is empty</span>`);
-      return;
+      print(`<span class="c-err">editor is empty</span>`);
+      //return;
     }
     print(`<span class="c-muted">compiling…</span>`);
     try {
