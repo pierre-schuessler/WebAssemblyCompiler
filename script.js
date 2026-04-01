@@ -1,3 +1,5 @@
+import { compile } from "./compiler.js";
+
 // ── PANEL RESIZE ──────────────────────────────────
 
 function makeResizable(handleId, panelId, minW, maxW, storageKey) {
