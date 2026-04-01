@@ -118,8 +118,8 @@ function showDocError(viewer, name, err) {
 
 function renderMarkdown(md) {
   if (!md) return "";
+  md = md.replace(/\r\n/g, "\n");
 
-  // Extract code blocks first to prevent formatting inside them
   const codeBlocks = [];
   md = md.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, code) => {
     const placeholder = `@@CODE_BLOCK_${codeBlocks.length}@@`;
@@ -127,35 +127,23 @@ function renderMarkdown(md) {
     return placeholder;
   });
 
-  // Escape HTML for the rest
   md = md
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 
-  // Headers
   md = md
     .replace(/^### (.+)$/gm, "<h3>$1</h3>")
     .replace(/^## (.+)$/gm, "<h2>$1</h2>")
     .replace(/^# (.+)$/gm, "<h1>$1</h1>");
 
-  // Blockquotes
   md = md.replace(/^> (.+)$/gm, "<blockquote><p>$1</p></blockquote>");
-
-  // Horizontal rules
   md = md.replace(/^---$/gm, "<hr>");
-
-  // Bold and italic (order matters)
   md = md.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   md = md.replace(/\*(.+?)\*/g, "<em>$1</em>");
-
-  // Inline code
   md = md.replace(/`([^`]+)`/g, "<code>$1</code>");
-
-  // Links
   md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
 
-  // Lists (unordered only, single-level)
   md = md.replace(/(^- .+(?:\n- .+)*)/gm, (block) => {
     const items = block
       .trim()
@@ -165,9 +153,9 @@ function renderMarkdown(md) {
     return `<ul>${items}</ul>`;
   });
 
-  // Tables (simple, header + separator + rows)
   md = md.replace(
-    /(\|.+\|\n)(\|[-: ]+\|\n)((?:\|.+\|\n?)*)/g,
+    
+    /(\|.+\|[ \t]*\n)(\|[-| :]+\|[ \t]*\n)((?:\|.+\|[ \t]*\n?)*)/g,
     (_, head, _sep, body) => {
       const th = head
         .trim()
@@ -194,18 +182,16 @@ function renderMarkdown(md) {
     }
   );
 
-  // Paragraphs: wrap everything not already wrapped in tags
   md = md
     .split(/\n{2,}/)
     .map((chunk) => {
       const t = chunk.trim();
       if (!t) return "";
-      if (/^<(h[1-3]|ul|ol|pre|table|blockquote|hr|code)/.test(t)) return t;
+      if (/^<(h[1-3]|ul|ol|pre|table|blockquote|hr|code)/i.test(t)) return t;
       return `<p>${t.replace(/\n/g, " ")}</p>`;
     })
     .join("\n");
 
-  // Restore code blocks
   md = md.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, i) => {
     const code = codeBlocks[i];
     return `<pre><code>${code.trimEnd()}</code></pre>`;
