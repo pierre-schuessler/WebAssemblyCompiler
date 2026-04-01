@@ -1,3 +1,5 @@
+// ─── Encoding Helpers ────────────────────────────────────────────────────────
+
 function encodeULEB128(v) {
   const b = [];
   do {
@@ -9,66 +11,188 @@ function encodeULEB128(v) {
   return b;
 }
 
+function encodeSLEB128(v) {
+  const b = [];
+  let more = true;
+  while (more) {
+    let byte = v & 0x7f;
+    v >>= 7;
+    if ((v === 0 && (byte & 0x40) === 0) || (v === -1 && (byte & 0x40) !== 0))
+      more = false;
+    else
+      byte |= 0x80;
+    b.push(byte);
+  }
+  return b;
+}
+
+function encodeF32(v) {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setFloat32(0, v, true);
+  return [...new Uint8Array(buf)];
+}
+
+function encodeF64(v) {
+  const buf = new ArrayBuffer(8);
+  new DataView(buf).setFloat64(0, v, true);
+  return [...new Uint8Array(buf)];
+}
+
+// ─── Instruction Encoder ─────────────────────────────────────────────────────
+
 const defaultAlign = { i32: 2, i64: 3, f32: 2, f64: 3 };
 
 function encodeWasmInstruction(words) {
+  // Strip optional type qualifier from position 1 (e.g. "add i32" → type="i32")
   let type = "i32";
   const validTypes = ["empty", "i32", "i64", "f32", "f64"];
   if (words.length > 1 && validTypes.includes(words[1])) {
     type = words[1];
     words.splice(1, 1);
   }
-  const op = {
-    get: 0x20,
-    return: 0x0f,
-    drop: 0x1a,
-    call: 0x10,
-    if: 0x04,
-    else: 0x05,
-    end: 0x0b,
-    add:  { i32: 0x6a, i64: 0x7c, f32: 0x92, f64: 0xa0 },
-    sub:  { i32: 0x6b, i64: 0x7d, f32: 0x93, f64: 0xa1 },
-    mul:  { i32: 0x6c, i64: 0x7e, f32: 0x94, f64: 0xa2 },
-    div:  { i32: 0x6d, i64: 0x7f, f32: 0x95, f64: 0xa3 },
-    const: { i32: 0x41, i64: 0x42, f32: 0x43, f64: 0x44 },
-    load:     { i32: 0x28, i64: 0x29, f32: 0x2a, f64: 0x2b },
-    store:    { i32: 0x36, i64: 0x37, f32: 0x38, f64: 0x39 },
-    load8_s:  { i32: 0x2c, i64: 0x30 },
-    load8_u:  { i32: 0x2d, i64: 0x31 },
-    load16_s: { i32: 0x2e, i64: 0x32 },
-    load16_u: { i32: 0x2f, i64: 0x33 },
-    load32_s: { i64: 0x34 },
-    load32_u: { i64: 0x35 },
-    store8:   { i32: 0x3a, i64: 0x3c },
-    store16:  { i32: 0x3b, i64: 0x3d },
-    store32:  { i64: 0x3e },
-  };
+
   const bt = { empty: 0x40, i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
 
-  switch (words[0]) {
-    case "get":
-      return [op.get, ...encodeULEB128(Number(words[1]))];
-    case "const":
-      return [op.const[type], ...encodeULEB128(Number(words[1]))];
-    case "drop":
-      return [op.drop];
-    case "call":
-      return [op.call, ...encodeULEB128(Number(words[1]))];
-    case "if":
-      return [op.if, bt[type]];
-    case "else":
-      return [op.else];
-    case "end":
-      return [op.end];
-    case "add":
-    case "sub":
-    case "mul":
-    case "div":
-      return [op[words[0]][type]];
-    case "return":
-      return [op.return];
+  // ── Arithmetic ──────────────────────────────────────────────────────────────
+  const arith = {
+    add:      { i32: 0x6a, i64: 0x7c, f32: 0x92, f64: 0xa0 },
+    sub:      { i32: 0x6b, i64: 0x7d, f32: 0x93, f64: 0xa1 },
+    mul:      { i32: 0x6c, i64: 0x7e, f32: 0x94, f64: 0xa2 },
+    div:      { i32: 0x6d, i64: 0x7f, f32: 0x95, f64: 0xa3 }, // signed for ints
+    div_s:    { i32: 0x6d, i64: 0x7f },
+    div_u:    { i32: 0x6e, i64: 0x80 },
+    rem_s:    { i32: 0x6f, i64: 0x81 },
+    rem_u:    { i32: 0x70, i64: 0x82 },
+    and:      { i32: 0x71, i64: 0x83 },
+    or:       { i32: 0x72, i64: 0x84 },
+    xor:      { i32: 0x73, i64: 0x85 },
+    shl:      { i32: 0x74, i64: 0x86 },
+    shr_s:    { i32: 0x75, i64: 0x87 },
+    shr_u:    { i32: 0x76, i64: 0x88 },
+    rotl:     { i32: 0x77, i64: 0x89 },
+    rotr:     { i32: 0x78, i64: 0x8a },
+    clz:      { i32: 0x67, i64: 0x79 },
+    ctz:      { i32: 0x68, i64: 0x7a },
+    popcnt:   { i32: 0x69, i64: 0x7b },
+    abs:      { f32: 0x8b, f64: 0x99 },
+    neg:      { f32: 0x8c, f64: 0x9a },
+    ceil:     { f32: 0x8d, f64: 0x9b },
+    floor:    { f32: 0x8e, f64: 0x9c },
+    trunc:    { f32: 0x8f, f64: 0x9d }, // float rounding (NOT int conversion)
+    nearest:  { f32: 0x90, f64: 0x9e },
+    sqrt:     { f32: 0x91, f64: 0x9f },
+    min:      { f32: 0x96, f64: 0xa4 },
+    max:      { f32: 0x97, f64: 0xa5 },
+    copysign: { f32: 0x98, f64: 0xa6 },
+  };
 
-    // Memory load instructions
+  // ── Comparisons ────────────────────────────────────────────────────────────
+  const cmp = {
+    eqz:  { i32: 0x45, i64: 0x50 },
+    eq:   { i32: 0x46, i64: 0x51, f32: 0x5b, f64: 0x61 },
+    ne:   { i32: 0x47, i64: 0x52, f32: 0x5c, f64: 0x62 },
+    lt_s: { i32: 0x48, i64: 0x53 },
+    lt_u: { i32: 0x49, i64: 0x54 },
+    lt:   { f32: 0x5d, f64: 0x63 },
+    gt_s: { i32: 0x4a, i64: 0x55 },
+    gt_u: { i32: 0x4b, i64: 0x56 },
+    gt:   { f32: 0x5e, f64: 0x64 },
+    le_s: { i32: 0x4c, i64: 0x57 },
+    le_u: { i32: 0x4d, i64: 0x58 },
+    le:   { f32: 0x5f, f64: 0x65 },
+    ge_s: { i32: 0x4e, i64: 0x59 },
+    ge_u: { i32: 0x4f, i64: 0x5a },
+    ge:   { f32: 0x60, f64: 0x66 },
+  };
+
+  // ── Type Conversions ────────────────────────────────────────────────────────
+  // Use full explicit names to avoid ambiguity with the type qualifier system.
+  // Format: "<dest>.<op>"  e.g. "i32.wrap", "f32.convert_s_i32"
+  const conv = {
+    "i32.wrap":          0xa7,  // i64 → i32
+    "i32.trunc_s_f32":   0xa8,  // f32 → i32 signed
+    "i32.trunc_u_f32":   0xa9,  // f32 → i32 unsigned
+    "i32.trunc_s_f64":   0xaa,  // f64 → i32 signed
+    "i32.trunc_u_f64":   0xab,  // f64 → i32 unsigned
+    "i64.extend_s":      0xac,  // i32 → i64 sign-extend
+    "i64.extend_u":      0xad,  // i32 → i64 zero-extend
+    "i64.trunc_s_f32":   0xae,  // f32 → i64 signed
+    "i64.trunc_u_f32":   0xaf,  // f32 → i64 unsigned
+    "i64.trunc_s_f64":   0xb0,  // f64 → i64 signed
+    "i64.trunc_u_f64":   0xb1,  // f64 → i64 unsigned
+    "f32.convert_s_i32": 0xb2,  // i32 → f32 signed
+    "f32.convert_u_i32": 0xb3,  // i32 → f32 unsigned
+    "f32.convert_s_i64": 0xb4,  // i64 → f32 signed
+    "f32.convert_u_i64": 0xb5,  // i64 → f32 unsigned
+    "f32.demote":        0xb6,  // f64 → f32
+    "f64.convert_s_i32": 0xb7,  // i32 → f64 signed
+    "f64.convert_u_i32": 0xb8,  // i32 → f64 unsigned
+    "f64.convert_s_i64": 0xb9,  // i64 → f64 signed
+    "f64.convert_u_i64": 0xba,  // i64 → f64 unsigned
+    "f64.promote":       0xbb,  // f32 → f64
+    "i32.reinterpret":   0xbc,  // f32 bits → i32
+    "i64.reinterpret":   0xbd,  // f64 bits → i64
+    "f32.reinterpret":   0xbe,  // i32 bits → f32
+    "f64.reinterpret":   0xbf,  // i64 bits → f64
+  };
+
+  const instr = words[0];
+
+  // Conversion instructions have dots in their names; look them up directly
+  if (conv[instr] != null) return [conv[instr]];
+
+  switch (instr) {
+    // ── Locals ───────────────────────────────────────────────────────────────
+    case "get": return [0x20, ...encodeULEB128(Number(words[1]))];
+    case "set": return [0x21, ...encodeULEB128(Number(words[1]))];
+    case "tee": return [0x22, ...encodeULEB128(Number(words[1]))];
+
+    // ── Globals ──────────────────────────────────────────────────────────────
+    case "global.get": return [0x23, ...encodeULEB128(Number(words[1]))];
+    case "global.set": return [0x24, ...encodeULEB128(Number(words[1]))];
+
+    // ── Constants ────────────────────────────────────────────────────────────
+    case "const": {
+      const v = Number(words[1]);
+      if (type === "f32") return [0x43, ...encodeF32(v)];
+      if (type === "f64") return [0x44, ...encodeF64(v)];
+      if (type === "i64") return [0x42, ...encodeSLEB128(v)];
+      return              [0x41, ...encodeSLEB128(v)]; // i32 default
+    }
+
+    // ── Control Flow ─────────────────────────────────────────────────────────
+    case "nop":           return [0x01];
+    case "unreachable":   return [0x00];
+    case "return":        return [0x0f];
+    case "drop":          return [0x1a];
+    case "select":        return [0x1b];
+    case "call":          return [0x10, ...encodeULEB128(Number(words[1]))];
+    case "call_indirect": return [0x11, ...encodeULEB128(Number(words[1])), 0x00];
+
+    // ── Block Structures ─────────────────────────────────────────────────────
+    case "block": return [0x02, bt[type]];
+    case "loop":  return [0x03, bt[type]];
+    case "if":    return [0x04, bt[type]];
+    case "else":  return [0x05];
+    case "end":   return [0x0b];
+
+    // ── Branches ─────────────────────────────────────────────────────────────
+    case "br":    return [0x0c, ...encodeULEB128(Number(words[1]))];
+    case "br_if": return [0x0d, ...encodeULEB128(Number(words[1]))];
+    case "br_table": {
+      // All args except last are targets; last is the default branch
+      const targets = words.slice(1).map(Number);
+      const def = targets.pop();
+      return [
+        0x0e,
+        ...encodeULEB128(targets.length),
+        ...targets.flatMap(encodeULEB128),
+        ...encodeULEB128(def),
+      ];
+    }
+
+    // ── Memory Loads ─────────────────────────────────────────────────────────
+    // Syntax: load [type] [align] [offset]
     case "load":
     case "load8_s":
     case "load8_u":
@@ -76,145 +200,227 @@ function encodeWasmInstruction(words) {
     case "load16_u":
     case "load32_s":
     case "load32_u": {
-      const opcode = op[words[0]][type];
-      if (opcode == null)
-        throw new Error(`Unsupported type '${type}' for '${words[0]}'`);
-      const align  = Number(words[1] ?? defaultAlign[type] ?? 2);
-      const offset = Number(words[2] ?? 0);
-      return [opcode, ...encodeULEB128(align), ...encodeULEB128(offset)];
+      const ops = {
+        load:     { i32: 0x28, i64: 0x29, f32: 0x2a, f64: 0x2b },
+        load8_s:  { i32: 0x2c, i64: 0x30 },
+        load8_u:  { i32: 0x2d, i64: 0x31 },
+        load16_s: { i32: 0x2e, i64: 0x32 },
+        load16_u: { i32: 0x2f, i64: 0x33 },
+        load32_s: { i64: 0x34 },
+        load32_u: { i64: 0x35 },
+      };
+      const opcode = ops[instr][type];
+      if (opcode == null) throw new Error(`Unsupported type '${type}' for '${instr}'`);
+      return [
+        opcode,
+        ...encodeULEB128(Number(words[1] ?? defaultAlign[type] ?? 2)),
+        ...encodeULEB128(Number(words[2] ?? 0)),
+      ];
     }
 
-    // Memory store instructions
+    // ── Memory Stores ────────────────────────────────────────────────────────
+    // Syntax: store [type] [align] [offset]
     case "store":
     case "store8":
     case "store16":
     case "store32": {
-      const opcode = op[words[0]][type];
-      if (opcode == null)
-        throw new Error(`Unsupported type '${type}' for '${words[0]}'`);
-      const align  = Number(words[1] ?? defaultAlign[type] ?? 2);
-      const offset = Number(words[2] ?? 0);
-      return [opcode, ...encodeULEB128(align), ...encodeULEB128(offset)];
+      const ops = {
+        store:   { i32: 0x36, i64: 0x37, f32: 0x38, f64: 0x39 },
+        store8:  { i32: 0x3a, i64: 0x3c },
+        store16: { i32: 0x3b, i64: 0x3d },
+        store32: { i64: 0x3e },
+      };
+      const opcode = ops[instr][type];
+      if (opcode == null) throw new Error(`Unsupported type '${type}' for '${instr}'`);
+      return [
+        opcode,
+        ...encodeULEB128(Number(words[1] ?? defaultAlign[type] ?? 2)),
+        ...encodeULEB128(Number(words[2] ?? 0)),
+      ];
     }
 
-    // Memory size / grow
-    case "memory.size":
-      return [0x3f, 0x00];
-    case "memory.grow":
-      return [0x40, 0x00];
+    // ── Memory Management ────────────────────────────────────────────────────
+    case "memory.size": return [0x3f, 0x00];
+    case "memory.grow": return [0x40, 0x00];
 
-    default:
-      return [Number(words[0])];
+    // ── Arithmetic & Comparisons (table lookup) ───────────────────────────────
+    default: {
+      if (arith[instr]?.[type] != null) return [arith[instr][type]];
+      if (cmp[instr]?.[type]   != null) return [cmp[instr][type]];
+      return [Number(instr)]; // raw opcode fallback
+    }
   }
 }
+
+// ─── Compiler ────────────────────────────────────────────────────────────────
 
 export function compile(code) {
   const lines = code
     .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith(";"));
+    .map((l) => l.replace(/;.*$/, "").trim()) // strip inline comments
+    .filter((l) => l.length > 0);
   if (!lines.length) return null;
 
-  const bytes = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
-  let types     = [],
-      functions = [],
-      imports   = [],
-      exports   = [],
-      codes     = [],
-      tmp       = [],
-      memory    = null;
+  const bytes = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]; // magic + version
+
+  let types    = [],  // [{inputs: [valtype], outputs: [valtype]}]
+      functions= [],  // type index for each defined function
+      imports  = [],  // [{module, name, typeIndex}]
+      exports  = [],  // [{name}]
+      codes    = [],  // [{locals: [valtype], bytes: []}]
+      globals  = [],  // [{gtype, mutable, initBytes}]
+      dataSegs = [],  // [{offset, bytes}]
+      memory   = null,
+      tmp      = null; // function body currently being assembled
 
   const tmap = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
 
+  function flushTmp() {
+    if (tmp) { codes.push(tmp); tmp = null; }
+  }
+
   for (const line of lines) {
-    const words = line.split(" ").filter((p) => p.length > 0);
+    const words = line.split(/\s+/).filter((p) => p.length > 0);
     if (!words.length) continue;
 
+    // ── memory <min> [<max>] ──────────────────────────────────────────────────
     if (words[0] === "memory") {
-      // memory <min> [<max>]
       memory = {
         min: Number(words[1] ?? 1),
         max: words[2] != null ? Number(words[2]) : null,
       };
+
+    // ── global [mut] <type> <initvalue> ──────────────────────────────────────
+    } else if (words[0] === "global") {
+      let i = 1, mutable = false;
+      if (words[i] === "mut") { mutable = true; i++; }
+      const typeName = words[i++];
+      const gtype    = tmap[typeName];
+      const val      = Number(words[i]);
+      let initBytes;
+      if      (typeName === "f32") initBytes = [0x43, ...encodeF32(val),     0x0b];
+      else if (typeName === "f64") initBytes = [0x44, ...encodeF64(val),     0x0b];
+      else if (typeName === "i64") initBytes = [0x42, ...encodeSLEB128(val), 0x0b];
+      else                         initBytes = [0x41, ...encodeSLEB128(val), 0x0b];
+      globals.push({ gtype, mutable, initBytes });
+
+    // ── data <offset> "<string>" | <byte> <byte> ... ─────────────────────────
+    } else if (words[0] === "data") {
+      const offset = Number(words[1]);
+      let dataBytes;
+      if (words[2]?.startsWith('"')) {
+        // Rejoin to handle spaces inside string literals, then strip quotes
+        const str = words.slice(2).join(" ").replace(/^"|"$/g, "");
+        dataBytes = [...str].map((c) => c.charCodeAt(0));
+      } else {
+        dataBytes = words.slice(2).map(Number);
+      }
+      dataSegs.push({ offset, bytes: dataBytes });
+
+    // ── export <name> <params> => <returns> [locals <types>] ─────────────────
     } else if (words[0] === "export") {
-      if (tmp.length) { codes.push(tmp); tmp = []; }
-      let inputs = [], outputs = [], mode = "inputs";
+      flushTmp();
+      let inputs = [], outputs = [], locals = [], mode = "inputs";
       for (let j = 2; j < words.length; j++) {
-        if (words[j] === "=>") { mode = "outputs"; continue; }
-        if (tmap[words[j]])
-          (mode === "inputs" ? inputs : outputs).push(tmap[words[j]]);
+        if (words[j] === "=>")     { mode = "outputs"; continue; }
+        if (words[j] === "locals") { mode = "locals";  continue; }
+        if (tmap[words[j]] != null) {
+          if      (mode === "inputs")  inputs.push(tmap[words[j]]);
+          else if (mode === "outputs") outputs.push(tmap[words[j]]);
+          else if (mode === "locals")  locals.push(tmap[words[j]]);
+        }
       }
       types.push({ inputs, outputs });
       functions.push(types.length - 1);
       exports.push({ name: words[1] });
+      tmp = { locals, bytes: [] };
+
+    // ── import <module> <name> <params> => <returns> ──────────────────────────
     } else if (words[0] === "import") {
-      if (tmp.length) { codes.push(tmp); tmp = []; }
+      flushTmp();
       let inputs = [], outputs = [], mode = "inputs";
       for (let j = 3; j < words.length; j++) {
         if (words[j] === "=>") { mode = "outputs"; continue; }
-        if (tmap[words[j]])
+        if (tmap[words[j]] != null)
           (mode === "inputs" ? inputs : outputs).push(tmap[words[j]]);
       }
       types.push({ inputs, outputs });
-      imports.push({
-        module: words[1],
-        name: words[2],
-        typeIndex: types.length - 1,
-      });
+      imports.push({ module: words[1], name: words[2], typeIndex: types.length - 1 });
+
+    // ── instruction ───────────────────────────────────────────────────────────
     } else {
-      tmp.push(...encodeWasmInstruction(words));
+      if (!tmp) tmp = { locals: [], bytes: [] };
+      tmp.bytes.push(...encodeWasmInstruction([...words])); // copy to avoid splice mutation
     }
   }
-  if (tmp.length) codes.push(tmp);
+  flushTmp();
 
   // ── Section 1: Type ───────────────────────────────────────────────────────
-  bytes.push(0x01);
-  let tsl = 1;
-  types.forEach((t) => {
-    tsl += 1 + 1 + t.inputs.length + 1 + t.outputs.length;
-  });
-  bytes.push(...encodeULEB128(tsl), types.length);
-  types.forEach((t) => {
-    bytes.push(0x60, t.inputs.length, ...t.inputs, t.outputs.length, ...t.outputs);
-  });
+  {
+    bytes.push(0x01);
+    let size = encodeULEB128(types.length).length;
+    types.forEach((t) => { size += 1 + 1 + t.inputs.length + 1 + t.outputs.length; });
+    bytes.push(...encodeULEB128(size), ...encodeULEB128(types.length));
+    types.forEach((t) => {
+      bytes.push(0x60, t.inputs.length, ...t.inputs, t.outputs.length, ...t.outputs);
+    });
+  }
 
   // ── Section 2: Import ─────────────────────────────────────────────────────
-  bytes.push(0x02);
-  let isl = 1;
-  imports.forEach((i) => {
-    isl += 1 + i.module.length + 1 + i.name.length + 2;
-  });
-  bytes.push(...encodeULEB128(isl), imports.length);
-  imports.forEach((imp) => {
-    bytes.push(imp.module.length, ...[...imp.module].map((c) => c.charCodeAt(0)));
-    bytes.push(imp.name.length,   ...[...imp.name].map((c) => c.charCodeAt(0)));
-    bytes.push(0x00, ...encodeULEB128(imp.typeIndex));
-  });
+  {
+    bytes.push(0x02);
+    let size = encodeULEB128(imports.length).length;
+    imports.forEach((imp) => {
+      size += 1 + imp.module.length + 1 + imp.name.length + 1
+            + encodeULEB128(imp.typeIndex).length;
+    });
+    bytes.push(...encodeULEB128(size), ...encodeULEB128(imports.length));
+    imports.forEach((imp) => {
+      bytes.push(imp.module.length, ...[...imp.module].map((c) => c.charCodeAt(0)));
+      bytes.push(imp.name.length,   ...[...imp.name  ].map((c) => c.charCodeAt(0)));
+      bytes.push(0x00, ...encodeULEB128(imp.typeIndex));
+    });
+  }
 
   // ── Section 3: Function ───────────────────────────────────────────────────
-  bytes.push(0x03, ...encodeULEB128(1 + functions.length), functions.length);
-  functions.forEach((f) => bytes.push(...encodeULEB128(f)));
+  {
+    bytes.push(0x03);
+    let size = encodeULEB128(functions.length).length;
+    functions.forEach((f) => { size += encodeULEB128(f).length; });
+    bytes.push(...encodeULEB128(size), ...encodeULEB128(functions.length));
+    functions.forEach((f) => bytes.push(...encodeULEB128(f)));
+  }
 
   // ── Section 5: Memory ─────────────────────────────────────────────────────
   if (memory) {
-    const hasMax  = memory.max != null;
-    const minEnc  = encodeULEB128(memory.min);
-    const maxEnc  = hasMax ? encodeULEB128(memory.max) : [];
-    // count(1) + limits-flag(1) + min + optional max
-    const msl = 1 + 1 + minEnc.length + maxEnc.length;
-    bytes.push(0x05, ...encodeULEB128(msl));
-    bytes.push(0x01);                   // one memory entry
-    bytes.push(hasMax ? 0x01 : 0x00);  // limit type
-    bytes.push(...minEnc);
+    const hasMax = memory.max != null;
+    const minEnc = encodeULEB128(memory.min);
+    const maxEnc = hasMax ? encodeULEB128(memory.max) : [];
+    const size   = 1 + 1 + minEnc.length + maxEnc.length; // count(1) + flag + min + [max]
+    bytes.push(0x05, ...encodeULEB128(size));
+    bytes.push(0x01, hasMax ? 0x01 : 0x00, ...minEnc);
     if (hasMax) bytes.push(...maxEnc);
+  }
+
+  // ── Section 6: Global ─────────────────────────────────────────────────────
+  if (globals.length) {
+    bytes.push(0x06);
+    let size = encodeULEB128(globals.length).length;
+    globals.forEach((g) => { size += 2 + g.initBytes.length; }); // valtype + mut + initExpr
+    bytes.push(...encodeULEB128(size), ...encodeULEB128(globals.length));
+    globals.forEach((g) => {
+      bytes.push(g.gtype, g.mutable ? 0x01 : 0x00, ...g.initBytes);
+    });
   }
 
   // ── Section 7: Export ─────────────────────────────────────────────────────
   if (exports.length) {
     bytes.push(0x07);
-    let esl = 1;
-    exports.forEach((e) => { esl += 1 + e.name.length + 2; });
-    bytes.push(...encodeULEB128(esl), exports.length);
+    let size = encodeULEB128(exports.length).length;
+    exports.forEach((e, idx) => {
+      size += 1 + e.name.length + 1 + encodeULEB128(idx + imports.length).length;
+    });
+    bytes.push(...encodeULEB128(size), ...encodeULEB128(exports.length));
     exports.forEach((e, idx) => {
       bytes.push(e.name.length, ...[...e.name].map((c) => c.charCodeAt(0)));
       bytes.push(0x00, ...encodeULEB128(idx + imports.length));
@@ -222,22 +428,52 @@ export function compile(code) {
   }
 
   // ── Section 10: Code ──────────────────────────────────────────────────────
-  bytes.push(0x0a);
-  const bodies = codes.map((c) => {
-    const b = [0x00, ...c, 0x0b];
-    return [...encodeULEB128(b.length), ...b];
-  });
-  let csl = 1;
-  bodies.forEach((b) => (csl += b.length));
-  bytes.push(...encodeULEB128(csl), codes.length);
-  bodies.forEach((b) => bytes.push(...b));
+  {
+    bytes.push(0x0a);
 
+    const bodies = codes.map((fn) => {
+      // Group consecutive same-type locals: [i32, i32, i64] → [(2,i32),(1,i64)]
+      const groups = [];
+      let i = 0;
+      while (i < fn.locals.length) {
+        let j = i;
+        while (j < fn.locals.length && fn.locals[j] === fn.locals[i]) j++;
+        groups.push([j - i, fn.locals[i]]);
+        i = j;
+      }
+      const localDecls  = groups.flatMap(([count, valtype]) => [...encodeULEB128(count), valtype]);
+      const groupCount  = encodeULEB128(groups.length);
+      // body = localGroupCount + localDecls + instructions + end(0x0b)
+      const body = [...groupCount, ...localDecls, ...fn.bytes, 0x0b];
+      return [...encodeULEB128(body.length), ...body];
+    });
+
+    let size = encodeULEB128(codes.length).length;
+    bodies.forEach((b) => (size += b.length));
+    bytes.push(...encodeULEB128(size), ...encodeULEB128(codes.length));
+    bodies.forEach((b) => bytes.push(...b));
+  }
+
+  // ── Section 11: Data ──────────────────────────────────────────────────────
+  if (dataSegs.length) {
+    bytes.push(0x0b);
+    // Each segment: memidx(0) + i32.const offset end + vec(bytes)
+    const segs = dataSegs.map((seg) => [
+      0x00,                                       // memory index (always 0)
+      0x41, ...encodeSLEB128(seg.offset), 0x0b,  // offset expression
+      ...encodeULEB128(seg.bytes.length),         // byte vector length
+      ...seg.bytes,
+    ]);
+    let size = encodeULEB128(dataSegs.length).length;
+    segs.forEach((s) => (size += s.length));
+    bytes.push(...encodeULEB128(size), ...encodeULEB128(dataSegs.length));
+    segs.forEach((s) => bytes.push(...s));
+  }
+
+  // ── Result ────────────────────────────────────────────────────────────────
   const result = new Uint8Array(bytes);
   const meta = {};
-  exports.forEach((e, idx) => {
-    const typeIdx = functions[idx];
-    meta[e.name] = types[typeIdx].inputs.length;
-  });
+  exports.forEach((e, idx) => { meta[e.name] = types[functions[idx]].inputs.length; });
   result.meta = meta;
   return result;
 }
