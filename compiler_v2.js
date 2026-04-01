@@ -54,7 +54,7 @@ export function compile(code) {
     .split("\n")
     .map((l) => l.replace(/;.*$/, "").trim()) // strip inline comments
     .filter((l) => l.length > 0);
-    if (!lines.length) return null;
+    if (!lines.length) console.warn("[WebAssemblyCompiler] Compiler was called without any code.");
 
     for (const line of lines) {
         const words = line.split(/\s+/).filter((p) => p.length > 0);
@@ -201,6 +201,4 @@ export function compile(code) {
     exports.forEach((e, idx) => { meta[e.name] = types[functions[idx]].inputs.length; });
     result.meta = meta;
     return result;
-
-    return binary;
 }
