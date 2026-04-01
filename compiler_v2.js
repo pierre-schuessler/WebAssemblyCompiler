@@ -318,9 +318,18 @@ export function compile(code) {
         break;
       }
       default: {
-        if (tmp) tmp.binary.push(...encodeWasmInstruction([...words]));
+        if (tmp) {
+            // resolve named locals to their index
+            const resolved = [...words];
+            if (["get", "set", "tee"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
+            const idx = tmp.locals.findIndex(([name]) => name === resolved[1]);
+            if (idx === -1) throw new Error(`Unknown local: '${resolved[1]}'`);
+            resolved[1] = String(idx);
+            }
+            tmp.binary.push(...encodeWasmInstruction(resolved));
+        }
         break;
-      }
+        }
     }
   }
   flushTmp();
