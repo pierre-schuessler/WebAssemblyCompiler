@@ -173,47 +173,72 @@ function encodeWasmInstruction(words) {
 }
 
 
-
 const TYPEMAP = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
 
-function preprocess(code){
-    const lines = code
+function preprocess(code) {
+  return code
     .split("\n")
-    .map((l) => l.replace(/;.*$/, "").trim()) // strip inline comments
+    .map((l) => l.replace(/;.*$/, "").trim())
     .filter((l) => l.length > 0);
-    return lines;
 }
 
-function process(words, tmp, types){
-    const resolved = [...words];
-    if (["get", "set", "tee"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
-        const paramCount = types[types.length - 1].inputs.length;
-        const idx = tmp.locals.findIndex(([name]) => name === resolved[1]);
-        if (idx === -1) throw new Error(`Unknown local: '${resolved[1]}'`);
-        resolved[1] = String(idx);
-    }
-    return resolved;
+function process(words, tmp, globalNames, imports) {
+  const resolved = [...words];
+
+  // resolve named locals/params for get/set/tee
+  if (["get", "set", "tee"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
+    const idx = tmp.locals.findIndex(([name]) => name === resolved[1]);
+    if (idx === -1) throw new Error(`Unknown local: '${resolved[1]}'`);
+    resolved[1] = String(idx);
+  }
+
+  // resolve named globals for global.get/global.set
+  if (["global.get", "global.set"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
+    const idx = globalNames.indexOf(resolved[1]);
+    if (idx === -1) throw new Error(`Unknown global: '${resolved[1]}'`);
+    resolved[1] = String(idx);
+  }
+
+  // resolve named function imports for call
+  if (resolved[0] === "call" && isNaN(Number(resolved[1]))) {
+    const idx = imports.findIndex((imp) => imp.localName === resolved[1]);
+    if (idx === -1) throw new Error(`Unknown import: '${resolved[1]}'`);
+    resolved[1] = String(idx);
+  }
+
+  return resolved;
 }
 
 
 export function compile(code) {
 
   const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]; // magic + version
-  let types    = [],  // [{inputs: [valtype], outputs: [valtype]}]
-      functions= [],  // type index for each defined function
-      imports  = [],  // [{module, name, typeIndex}]
-      exports  = [],  // [{name}]
-      codes    = [],  // [{locals: [[name, valtype]], binary: []}]
-      globals  = [],  // [{gtype, mutable, initbinary}]
-      dataSegs = [],  // [{offset, binary}]
-      memory   = null,
-      tmp      = null; // function body currently being assembled
+  let types       = [],  // [{inputs: [valtype], outputs: [valtype]}]
+      functions   = [],  // type index for each defined function
+      imports     = [],  // [{module, name, localName, typeIndex}]
+      exports     = [],  // [{name}]
+      codes       = [],  // [{locals: [[name, valtype]], binary: []}]
+      globals     = [],  // [{gname, gtype, mutable, initExpr}]
+      globalNames = [],  // parallel name list for resolution
+      dataSegs    = [],  // [{offset, bytes: []}]
+      memory      = null,
+      tmp         = null; // function body currently being assembled
 
   function flushTmp() {
     if (tmp) {
       tmp.binary.push(0x0b); // implicit end
       codes.push({ locals: tmp.locals, binary: tmp.binary });
       tmp = null;
+    }
+  }
+
+  function encodeInitExpr(initType, initVal) {
+    switch (initType) {
+      case "i32": return [0x41, ...encodeSLEB128(initVal), 0x0b];
+      case "i64": return [0x42, ...encodeSLEB128(initVal), 0x0b];
+      case "f32": return [0x43, ...encodeF32(initVal),     0x0b];
+      case "f64": return [0x44, ...encodeF64(initVal),     0x0b];
+      default: throw new Error(`Unknown init type: ${initType}`);
     }
   }
 
@@ -224,6 +249,8 @@ export function compile(code) {
     const words = line.split(/\s+/).filter((p) => p.length > 0);
     const verb = words[0];
     switch (verb) {
+
+      // ── memory min[-max] ───────────────────────────────────────────────────
       case "memory": {
         const parts = words[1]?.split("-");
         if (!parts) break;
@@ -234,39 +261,134 @@ export function compile(code) {
         memory = { min, max };
         break;
       }
+
+      // ── import module.name [localName] type... [=> rettype...] ────────────
+      // Examples:
+      //   import env.log i32 =>          ; anonymous import
+      //   import env.log logFn i32 =>    ; named import, call logFn
+      case "import": {
+        flushTmp();
+        const dot = words[1]?.indexOf(".");
+        if (!dot || dot === -1) throw new Error(`Import must be "module.name", got '${words[1]}'`);
+        const module = words[1].slice(0, dot);
+        const name   = words[1].slice(dot + 1);
+
+        let j = 2;
+        let localName = null;
+        if (words[j] && TYPEMAP[words[j]] == null && words[j] !== "=>") {
+          localName = words[j++];
+        }
+
+        let inputs = [], outputs = [], mode = "inputs";
+        for (; j < words.length; j++) {
+          if (words[j] === "=>") { mode = "outputs"; continue; }
+          if (TYPEMAP[words[j]] != null) {
+            if (mode === "inputs")  inputs.push(TYPEMAP[words[j]]);
+            else                    outputs.push(TYPEMAP[words[j]]);
+          }
+        }
+
+        types.push({ inputs, outputs });
+        imports.push({ module, name, localName, typeIndex: types.length - 1 });
+        break;
+      }
+
+      // ── global [mut] [name] type initval ──────────────────────────────────
+      // Examples:
+      //   global counter i32 0           ; immutable, named
+      //   global mut counter i32 0       ; mutable, named
+      //   global i32 0                   ; immutable, anonymous
+      //   global mut i32 0               ; mutable, anonymous
       case "global": {
+        flushTmp();
+        let j = 1;
+        const mutable = words[j] === "mut" ? (j++, true) : false;
+
+        let gname;
+        if (TYPEMAP[words[j]] == null) {
+          gname = words[j++]; // named
+        } else {
+          gname = `$g${globals.length}`; // anonymous
+        }
+
+        const gtypeStr = words[j++];
+        const gtype = TYPEMAP[gtypeStr];
+        if (gtype == null) throw new Error(`Unknown global type: '${gtypeStr}'`);
+
+        const initVal = Number(words[j] ?? 0);
+        const initExpr = encodeInitExpr(gtypeStr, initVal);
+
+        globalNames.push(gname);
+        globals.push({ gname, gtype, mutable, initExpr });
         break;
       }
+
+      // ── data offset "string literal" ──────────────────────────────────────
+      // ── data offset byte byte byte ... ────────────────────────────────────
+      // Examples:
+      //   data 0 "hello\n"
+      //   data 64 72 101 108 108 111
       case "data": {
+        const offset = Number(words[1]);
+        if (isNaN(offset)) throw new Error(`Invalid data offset: '${words[1]}'`);
+
+        let bytes = [];
+        const rest = line.slice(line.indexOf(words[1]) + words[1].length).trim();
+
+        if (rest.startsWith('"')) {
+          const str = rest.slice(1, rest.lastIndexOf('"'));
+          for (let i = 0; i < str.length; i++) {
+            if (str[i] === '\\' && i + 1 < str.length) {
+              const esc = str[++i];
+              if      (esc === 'n')  bytes.push(10);
+              else if (esc === 'r')  bytes.push(13);
+              else if (esc === 't')  bytes.push(9);
+              else if (esc === '0')  bytes.push(0);
+              else if (esc === '\\') bytes.push(92);
+              else if (esc === '"')  bytes.push(34);
+              else bytes.push(esc.charCodeAt(0));
+            } else {
+              bytes.push(str.charCodeAt(i));
+            }
+          }
+        } else {
+          bytes = words.slice(2).map(Number);
+        }
+
+        dataSegs.push({ offset, bytes });
         break;
       }
+
+      // ── export name [i32 paramname ...] [=> rettype ...] ──────────────────
       case "export": {
         flushTmp();
         let inputs = [], outputs = [], mode = "inputs";
-        const paramLocals = []; // TODO: check if there are names for all of them
+        const paramLocals = [];
         for (let j = 2; j < words.length; j++) {
-            if (words[j] === "=>") { mode = "outputs"; continue; }
-            if (TYPEMAP[words[j]] != null) {
+          if (words[j] === "=>") { mode = "outputs"; continue; }
+          if (TYPEMAP[words[j]] != null) {
             if (mode === "inputs") {
-                inputs.push(TYPEMAP[words[j]]);
-                const next = words[j + 1];
-                if (next && next !== "=>" && TYPEMAP[next] == null) {
+              inputs.push(TYPEMAP[words[j]]);
+              const next = words[j + 1];
+              if (next && next !== "=>" && TYPEMAP[next] == null) {
                 paramLocals.push([next, TYPEMAP[words[j]]]);
                 j++;
-                } else {
+              } else {
                 paramLocals.push([`$${inputs.length - 1}`, TYPEMAP[words[j]]]);
-                }
+              }
             } else {
-                outputs.push(TYPEMAP[words[j]]);
+              outputs.push(TYPEMAP[words[j]]);
             }
-            }
+          }
         }
         types.push({ inputs, outputs });
         functions.push(types.length - 1);
         exports.push({ name: words[1] });
-        tmp = { locals: paramLocals, binary: [] };  // <-- params go in here
+        tmp = { locals: paramLocals, binary: [] };
         break;
-        }
+      }
+
+      // ── local [name] type ─────────────────────────────────────────────────
       case "local": {
         if (tmp) {
           const valtype = TYPEMAP[words[words.length - 1]];
@@ -276,17 +398,19 @@ export function compile(code) {
         }
         break;
       }
+
+      // ── instructions ──────────────────────────────────────────────────────
       default: {
         if (tmp) {
-            // resolve named locals to their index
-            
-            tmp.binary.push(...encodeWasmInstruction(process(words, tmp, types)));
+          tmp.binary.push(...encodeWasmInstruction(process(words, tmp, globalNames, imports)));
         }
         break;
-        }
+      }
     }
   }
   flushTmp();
+
+  const importFnCount = imports.length;
 
   // ── Section 1: Type ───────────────────────────────────────────────────────
   {
@@ -300,19 +424,17 @@ export function compile(code) {
   }
 
   // ── Section 2: Import ─────────────────────────────────────────────────────
-  {
+  if (imports.length) {
     binary.push(0x02);
+    const encImp = imports.map((imp) => {
+      const mod = [...imp.module].map((c) => c.charCodeAt(0));
+      const nm  = [...imp.name  ].map((c) => c.charCodeAt(0));
+      return [mod.length, ...mod, nm.length, ...nm, 0x00, ...encodeULEB128(imp.typeIndex)];
+    });
     let size = encodeULEB128(imports.length).length;
-    imports.forEach((imp) => {
-      size += 1 + imp.module.length + 1 + imp.name.length + 1
-              + encodeULEB128(imp.typeIndex).length;
-    });
+    encImp.forEach((e) => (size += e.length));
     binary.push(...encodeULEB128(size), ...encodeULEB128(imports.length));
-    imports.forEach((imp) => {
-      binary.push(imp.module.length, ...[...imp.module].map((c) => c.charCodeAt(0)));
-      binary.push(imp.name.length,   ...[...imp.name  ].map((c) => c.charCodeAt(0)));
-      binary.push(0x00, ...encodeULEB128(imp.typeIndex));
-    });
+    encImp.forEach((e) => binary.push(...e));
   }
 
   // ── Section 3: Function ───────────────────────────────────────────────────
@@ -339,10 +461,10 @@ export function compile(code) {
   if (globals.length) {
     binary.push(0x06);
     let size = encodeULEB128(globals.length).length;
-    globals.forEach((g) => { size += 2 + g.initbinary.length; });
+    globals.forEach((g) => { size += 1 + 1 + g.initExpr.length; });
     binary.push(...encodeULEB128(size), ...encodeULEB128(globals.length));
     globals.forEach((g) => {
-      binary.push(g.gtype, g.mutable ? 0x01 : 0x00, ...g.initbinary);
+      binary.push(g.gtype, g.mutable ? 0x01 : 0x00, ...g.initExpr);
     });
   }
 
@@ -351,12 +473,12 @@ export function compile(code) {
     binary.push(0x07);
     let size = encodeULEB128(exports.length).length;
     exports.forEach((e, idx) => {
-      size += 1 + e.name.length + 1 + encodeULEB128(idx + imports.length).length;
+      size += 1 + e.name.length + 1 + encodeULEB128(idx + importFnCount).length;
     });
     binary.push(...encodeULEB128(size), ...encodeULEB128(exports.length));
     exports.forEach((e, idx) => {
       binary.push(e.name.length, ...[...e.name].map((c) => c.charCodeAt(0)));
-      binary.push(0x00, ...encodeULEB128(idx + imports.length));
+      binary.push(0x00, ...encodeULEB128(idx + importFnCount));
     });
   }
 
@@ -365,28 +487,27 @@ export function compile(code) {
     binary.push(0x0a);
 
     const bodies = codes.map((fn, fnIdx) => {
-        const paramCount = types[functions[fnIdx]].inputs.length;
-        const localValues = fn.locals.slice(paramCount).map(([_, valtype]) => valtype);
-      
+      const paramCount  = types[functions[fnIdx]].inputs.length;
+      const localValues = fn.locals.slice(paramCount).map(([_, valtype]) => valtype);
 
-        const groups = [];
-        let i = 0;
-        while (i < localValues.length) {
-            let j = i;
-            while (j < localValues.length && localValues[j] === localValues[i]) j++;
-            groups.push([j - i, localValues[i]]);
-            i = j;
-        }
-        const localDecls  = groups.flatMap(([count, valtype]) => [...encodeULEB128(count), valtype]);
-        const groupCount  = encodeULEB128(groups.length);
-        const body = [...groupCount, ...localDecls, ...fn.binary];
-        return [...encodeULEB128(body.length), ...body];
-        });
+      const groups = [];
+      let i = 0;
+      while (i < localValues.length) {
+        let j = i;
+        while (j < localValues.length && localValues[j] === localValues[i]) j++;
+        groups.push([j - i, localValues[i]]);
+        i = j;
+      }
+      const localDecls = groups.flatMap(([count, valtype]) => [...encodeULEB128(count), valtype]);
+      const groupCount = encodeULEB128(groups.length);
+      const body = [...groupCount, ...localDecls, ...fn.binary];
+      return [...encodeULEB128(body.length), ...body];
+    });
 
-        let size = encodeULEB128(codes.length).length;
-        bodies.forEach((b) => (size += b.length));
-        binary.push(...encodeULEB128(size), ...encodeULEB128(codes.length));
-        bodies.forEach((b) => binary.push(...b));
+    let size = encodeULEB128(codes.length).length;
+    bodies.forEach((b) => (size += b.length));
+    binary.push(...encodeULEB128(size), ...encodeULEB128(codes.length));
+    bodies.forEach((b) => binary.push(...b));
   }
 
   // ── Section 11: Data ──────────────────────────────────────────────────────
@@ -395,8 +516,8 @@ export function compile(code) {
     const segs = dataSegs.map((seg) => [
       0x00,
       0x41, ...encodeSLEB128(seg.offset), 0x0b,
-      ...encodeULEB128(seg.binary.length),
-      ...seg.binary,
+      ...encodeULEB128(seg.bytes.length),
+      ...seg.bytes,
     ]);
     let size = encodeULEB128(dataSegs.length).length;
     segs.forEach((s) => (size += s.length));
