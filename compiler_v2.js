@@ -175,11 +175,117 @@ function encodeWasmInstruction(words) {
 
 const TYPEMAP = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
 
+function parseCall(str) {
+  str = str.trim();
+
+  const firstParen = str.indexOf('(');
+
+  // 🔥 Special case: no parentheses
+  if (firstParen === -1) {
+    return {
+      type: "identifier",
+      name: str
+    };
+  }
+
+  const name = str.slice(0, firstParen).trim();
+
+  let inside = str.slice(firstParen);
+
+  // remove outer parentheses
+  if (inside.startsWith('(') && inside.endsWith(')')) {
+    inside = inside.slice(1, -1).trim();
+  }
+
+  // handle double parentheses like ((...))
+  if (inside.startsWith('(') && inside.endsWith(')')) {
+    inside = inside.slice(1, -1).trim();
+  }
+
+  const args = [];
+  let depth = 0;
+  let current = '';
+
+  for (let i = 0; i < inside.length; i++) {
+    const char = inside[i];
+
+    if (char === '(') {
+      depth++;
+      current += char;
+    } else if (char === ')') {
+      depth--;
+      current += char;
+    } else if (char === ',' && depth === 0) {
+      args.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  if (current) {
+    args.push(current.trim());
+  }
+
+  return {
+    type: "call",
+    name,
+    args
+  };
+}
+
+function recursive_expand(expression, counter = { n: 0 }) {
+    const parsed = parseCall(expression);
+    const instructions = [];
+
+    if (parsed.type === "identifier") {
+        const t = counter.n++;
+        instructions.push(`get ${parsed.name}`);
+        instructions.push(`set compiler_${t}`);
+        return { instructions, tempIndex: t };
+    }
+
+    const argTemps = [];
+    for (const arg of parsed.args) {
+        const result = recursive_expand(arg, counter);
+        instructions.push(...result.instructions);
+        argTemps.push(result.tempIndex);
+    }
+
+    for (const t of argTemps) {
+        instructions.push(`get compiler_${t}`);
+    }
+    instructions.push(parsed.name);
+    const t = counter.n++;
+    instructions.push(`set compiler_${t}`);
+
+    return { instructions, tempIndex: t };
+}
+
 function preprocess(code) {
-  return code
-    .split("\n")
-    .map((l) => l.replace(/;.*$/, "").trim())
-    .filter((l) => l.length > 0);
+    let lines = code
+        .split("\n")
+        .map((l) => l.replace(/;.*$/, "").trim())
+        .filter((l) => l.length > 0);
+
+    const counter = { n: 0 };
+    const result = [];
+
+    for (const line of lines) {
+        const eqIdx = line.indexOf("=");
+        if (eqIdx !== -1) {
+            const target = line.slice(0, eqIdx).trim();
+            const expression = line.slice(eqIdx + 1).trim();
+            const { instructions, tempIndex } = recursive_expand(expression, counter);
+            result.push(...instructions);
+            result.push(`get compiler_${tempIndex}`);
+            result.push(`set ${target}`);
+        } else {
+            result.push(line);
+        }
+    }
+
+    return result;
 }
 
 function process(words, tmp, globalNames, imports) {
