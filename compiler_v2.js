@@ -364,7 +364,7 @@ export function compile(code) {
   {
     binary.push(0x0a);
 
-    const bodies = codes.map((fn) => {
+    const bodies = codes.map((fn, fnIdx) => {
         const paramCount = types[functions[fnIdx]].inputs.length;
         const localValues = fn.locals.slice(paramCount).map(([_, valtype]) => valtype);
       
