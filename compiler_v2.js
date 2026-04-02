@@ -190,7 +190,7 @@ function process(words, tmp, types){
         const paramCount = types[types.length - 1].inputs.length;
         const idx = tmp.locals.findIndex(([name]) => name === resolved[1]);
         if (idx === -1) throw new Error(`Unknown local: '${resolved[1]}'`);
-        resolved[1] = String(paramCount + idx);
+        resolved[1] = String(idx);
     }
     return resolved;
 }
@@ -243,19 +243,30 @@ export function compile(code) {
       case "export": {
         flushTmp();
         let inputs = [], outputs = [], mode = "inputs";
+        const paramLocals = []; // TODO: check if there are names for all of them
         for (let j = 2; j < words.length; j++) {
-          if (words[j] === "=>")              { mode = "outputs"; continue; }
-          if (TYPEMAP[words[j]] != null) {
-            if      (mode === "inputs")  inputs.push(TYPEMAP[words[j]]);
-            else if (mode === "outputs") outputs.push(TYPEMAP[words[j]]);
-          }
+            if (words[j] === "=>") { mode = "outputs"; continue; }
+            if (TYPEMAP[words[j]] != null) {
+            if (mode === "inputs") {
+                inputs.push(TYPEMAP[words[j]]);
+                const next = words[j + 1];
+                if (next && next !== "=>" && TYPEMAP[next] == null) {
+                paramLocals.push([next, TYPEMAP[words[j]]]);
+                j++;
+                } else {
+                paramLocals.push([`$${inputs.length - 1}`, TYPEMAP[words[j]]]);
+                }
+            } else {
+                outputs.push(TYPEMAP[words[j]]);
+            }
+            }
         }
         types.push({ inputs, outputs });
         functions.push(types.length - 1);
         exports.push({ name: words[1] });
-        tmp = { locals: [], binary: [] };
+        tmp = { locals: paramLocals, binary: [] };  // <-- params go in here
         break;
-      }
+        }
       case "local": {
         if (tmp) {
           const valtype = TYPEMAP[words[words.length - 1]];
@@ -354,26 +365,28 @@ export function compile(code) {
     binary.push(0x0a);
 
     const bodies = codes.map((fn) => {
-      const localValues = fn.locals.map(([_, valtype]) => valtype);
+        const paramCount = types[functions[fnIdx]].inputs.length;
+        const localValues = fn.locals.slice(paramCount).map(([_, valtype]) => valtype);
+      
 
-      const groups = [];
-      let i = 0;
-      while (i < localValues.length) {
-        let j = i;
-        while (j < localValues.length && localValues[j] === localValues[i]) j++;
-        groups.push([j - i, localValues[i]]);
-        i = j;
-      }
-      const localDecls  = groups.flatMap(([count, valtype]) => [...encodeULEB128(count), valtype]);
-      const groupCount  = encodeULEB128(groups.length);
-      const body = [...groupCount, ...localDecls, ...fn.binary];
-      return [...encodeULEB128(body.length), ...body];
-    });
+        const groups = [];
+        let i = 0;
+        while (i < localValues.length) {
+            let j = i;
+            while (j < localValues.length && localValues[j] === localValues[i]) j++;
+            groups.push([j - i, localValues[i]]);
+            i = j;
+        }
+        const localDecls  = groups.flatMap(([count, valtype]) => [...encodeULEB128(count), valtype]);
+        const groupCount  = encodeULEB128(groups.length);
+        const body = [...groupCount, ...localDecls, ...fn.binary];
+        return [...encodeULEB128(body.length), ...body];
+        });
 
-    let size = encodeULEB128(codes.length).length;
-    bodies.forEach((b) => (size += b.length));
-    binary.push(...encodeULEB128(size), ...encodeULEB128(codes.length));
-    bodies.forEach((b) => binary.push(...b));
+        let size = encodeULEB128(codes.length).length;
+        bodies.forEach((b) => (size += b.length));
+        binary.push(...encodeULEB128(size), ...encodeULEB128(codes.length));
+        bodies.forEach((b) => binary.push(...b));
   }
 
   // ── Section 11: Data ──────────────────────────────────────────────────────
