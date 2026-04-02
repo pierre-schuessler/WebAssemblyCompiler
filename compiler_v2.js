@@ -247,7 +247,15 @@ function encodeWasmInstruction(words) {
 
 const TYPEMAP = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
 
-function preprocess(words, tmp, types){
+function preprocess(code){
+    const lines = code
+    .split("\n")
+    .map((l) => l.replace(/;.*$/, "").trim()) // strip inline comments
+    .filter((l) => l.length > 0);
+    return lines;
+}
+
+function process(words, tmp, types){
     const resolved = [...words];
     if (["get", "set", "tee"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
         const paramCount = types[types.length - 1].inputs.length;
@@ -280,10 +288,7 @@ export function compile(code) {
     }
   }
 
-  const lines = code
-    .split("\n")
-    .map((l) => l.replace(/;.*$/, "").trim()) // strip inline comments
-    .filter((l) => l.length > 0);
+  const lines = preprocess(code);
   if (!lines.length) console.warn("[WebAssemblyCompiler] Compiler was called without any code.");
 
   for (const line of lines) {
@@ -335,7 +340,7 @@ export function compile(code) {
         if (tmp) {
             // resolve named locals to their index
             
-            tmp.binary.push(...encodeWasmInstruction(preprocess(words, tmp, types)));
+            tmp.binary.push(...encodeWasmInstruction(process(words, tmp, types)));
         }
         break;
         }
