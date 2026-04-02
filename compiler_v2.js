@@ -180,24 +180,16 @@ function parseCall(str) {
 
   const firstParen = str.indexOf('(');
 
-  // 🔥 Special case: no parentheses
   if (firstParen === -1) {
-    return {
-      type: "identifier",
-      name: str
-    };
+    return { type: "identifier", name: str };
   }
 
   const name = str.slice(0, firstParen).trim();
-
   let inside = str.slice(firstParen);
 
-  // remove outer parentheses
   if (inside.startsWith('(') && inside.endsWith(')')) {
     inside = inside.slice(1, -1).trim();
   }
-
-  // handle double parentheses like ((...))
   if (inside.startsWith('(') && inside.endsWith(')')) {
     inside = inside.slice(1, -1).trim();
   }
@@ -208,30 +200,14 @@ function parseCall(str) {
 
   for (let i = 0; i < inside.length; i++) {
     const char = inside[i];
-
-    if (char === '(') {
-      depth++;
-      current += char;
-    } else if (char === ')') {
-      depth--;
-      current += char;
-    } else if (char === ',' && depth === 0) {
-      args.push(current.trim());
-      current = '';
-    } else {
-      current += char;
-    }
+    if (char === '(') { depth++; current += char; }
+    else if (char === ')') { depth--; current += char; }
+    else if (char === ',' && depth === 0) { args.push(current.trim()); current = ''; }
+    else { current += char; }
   }
+  if (current) args.push(current.trim());
 
-  if (current) {
-    args.push(current.trim());
-  }
-
-  return {
-    type: "call",
-    name,
-    args
-  };
+  return { type: "call", name, args };
 }
 
 function recursive_expand(expression, counter = { n: 0 }) {
@@ -269,31 +245,37 @@ function preprocess(code) {
         .filter((l) => l.length > 0);
 
     const counter = { n: 0 };
+    const declaredLocals = new Set();
     const result = [];
 
     for (const line of lines) {
-        // Check if this is an export line — flush pending temps before it
-        if (line.startsWith("export")) {
+        // Pass through non-assignment lines unchanged
+        if (!line.includes("=") || line.startsWith("export") || line.startsWith("import") || line.startsWith("global")) {
             result.push(line);
             continue;
         }
 
         const eqIdx = line.indexOf("=");
-        if (eqIdx !== -1) {
-            const target = line.slice(0, eqIdx).trim();
-            const expression = line.slice(eqIdx + 1).trim();
-            const beforeCount = counter.n;
-            const { instructions, tempIndex } = recursive_expand(expression, counter);
-            // Register any new temps that were created as locals
-            for (let i = beforeCount; i < counter.n; i++) {
-                result.push(`local compiler_${i} i32`);
-            }
-            result.push(...instructions);
-            result.push(`get compiler_${tempIndex}`);
-            result.push(`set ${target}`);
-        } else {
-            result.push(line);
+        const target = line.slice(0, eqIdx).trim();
+        const expression = line.slice(eqIdx + 1).trim();
+
+        const beforeCount = counter.n;
+        const { instructions, tempIndex } = recursive_expand(expression, counter);
+
+        // Declare any new compiler temps that were created
+        for (let i = beforeCount; i < counter.n; i++) {
+            result.push(`local compiler_${i} i32`);
         }
+
+        // Declare the target variable if we haven't seen it before
+        if (!declaredLocals.has(target)) {
+            result.push(`local ${target} i32`);
+            declaredLocals.add(target);
+        }
+
+        result.push(...instructions);
+        result.push(`get compiler_${tempIndex}`);
+        result.push(`set ${target}`);
     }
 
     return result;
@@ -302,21 +284,18 @@ function preprocess(code) {
 function process(words, tmp, globalNames, imports) {
   const resolved = [...words];
 
-  // resolve named locals/params for get/set/tee
   if (["get", "set", "tee"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
     const idx = tmp.locals.findIndex(([name]) => name === resolved[1]);
     if (idx === -1) throw new Error(`Unknown local: '${resolved[1]}'`);
     resolved[1] = String(idx);
   }
 
-  // resolve named globals for global.get/global.set
   if (["global.get", "global.set"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
     const idx = globalNames.indexOf(resolved[1]);
     if (idx === -1) throw new Error(`Unknown global: '${resolved[1]}'`);
     resolved[1] = String(idx);
   }
 
-  // resolve named function imports for call
   if (resolved[0] === "call" && isNaN(Number(resolved[1]))) {
     const idx = imports.findIndex((imp) => imp.localName === resolved[1]);
     if (idx === -1) throw new Error(`Unknown import: '${resolved[1]}'`);
@@ -330,20 +309,20 @@ function process(words, tmp, globalNames, imports) {
 export function compile(code) {
 
   const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]; // magic + version
-  let types       = [],  // [{inputs: [valtype], outputs: [valtype]}]
-      functions   = [],  // type index for each defined function
-      imports     = [],  // [{module, name, localName, typeIndex}]
-      exports     = [],  // [{name}]
-      codes       = [],  // [{locals: [[name, valtype]], binary: []}]
-      globals     = [],  // [{gname, gtype, mutable, initExpr}]
-      globalNames = [],  // parallel name list for resolution
-      dataSegs    = [],  // [{offset, bytes: []}]
+  let types       = [],
+      functions   = [],
+      imports     = [],
+      exports     = [],
+      codes       = [],
+      globals     = [],
+      globalNames = [],
+      dataSegs    = [],
       memory      = null,
-      tmp         = null; // function body currently being assembled
+      tmp         = null;
 
   function flushTmp() {
     if (tmp) {
-      tmp.binary.push(0x0b); // implicit end
+      tmp.binary.push(0x0b);
       codes.push({ locals: tmp.locals, binary: tmp.binary });
       tmp = null;
     }
@@ -367,7 +346,6 @@ export function compile(code) {
     const verb = words[0];
     switch (verb) {
 
-      // ── memory min[-max] ───────────────────────────────────────────────────
       case "memory": {
         const parts = words[1]?.split("-");
         if (!parts) break;
@@ -379,10 +357,6 @@ export function compile(code) {
         break;
       }
 
-      // ── import module.name [localName] type... [=> rettype...] ────────────
-      // Examples:
-      //   import env.log i32 =>          ; anonymous import
-      //   import env.log logFn i32 =>    ; named import, call logFn
       case "import": {
         flushTmp();
         const dot = words[1]?.indexOf(".");
@@ -410,12 +384,6 @@ export function compile(code) {
         break;
       }
 
-      // ── global [mut] [name] type initval ──────────────────────────────────
-      // Examples:
-      //   global counter i32 0           ; immutable, named
-      //   global mut counter i32 0       ; mutable, named
-      //   global i32 0                   ; immutable, anonymous
-      //   global mut i32 0               ; mutable, anonymous
       case "global": {
         flushTmp();
         let j = 1;
@@ -423,9 +391,9 @@ export function compile(code) {
 
         let gname;
         if (TYPEMAP[words[j]] == null) {
-          gname = words[j++]; // named
+          gname = words[j++];
         } else {
-          gname = `$g${globals.length}`; // anonymous
+          gname = `$g${globals.length}`;
         }
 
         const gtypeStr = words[j++];
@@ -440,11 +408,6 @@ export function compile(code) {
         break;
       }
 
-      // ── data offset "string literal" ──────────────────────────────────────
-      // ── data offset byte byte byte ... ────────────────────────────────────
-      // Examples:
-      //   data 0 "hello\n"
-      //   data 64 72 101 108 108 111
       case "data": {
         const offset = Number(words[1]);
         if (isNaN(offset)) throw new Error(`Invalid data offset: '${words[1]}'`);
@@ -476,7 +439,6 @@ export function compile(code) {
         break;
       }
 
-      // ── export name [i32 paramname ...] [=> rettype ...] ──────────────────
       case "export": {
         flushTmp();
         let inputs = [], outputs = [], mode = "inputs";
@@ -505,7 +467,6 @@ export function compile(code) {
         break;
       }
 
-      // ── local [name] type ─────────────────────────────────────────────────
       case "local": {
         if (tmp) {
           const valtype = TYPEMAP[words[words.length - 1]];
@@ -516,7 +477,6 @@ export function compile(code) {
         break;
       }
 
-      // ── instructions ──────────────────────────────────────────────────────
       default: {
         if (tmp) {
           tmp.binary.push(...encodeWasmInstruction(process(words, tmp, globalNames, imports)));
