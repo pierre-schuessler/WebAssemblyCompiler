@@ -272,11 +272,22 @@ function preprocess(code) {
     const result = [];
 
     for (const line of lines) {
+        // Check if this is an export line — flush pending temps before it
+        if (line.startsWith("export")) {
+            result.push(line);
+            continue;
+        }
+
         const eqIdx = line.indexOf("=");
         if (eqIdx !== -1) {
             const target = line.slice(0, eqIdx).trim();
             const expression = line.slice(eqIdx + 1).trim();
+            const beforeCount = counter.n;
             const { instructions, tempIndex } = recursive_expand(expression, counter);
+            // Register any new temps that were created as locals
+            for (let i = beforeCount; i < counter.n; i++) {
+                result.push(`local compiler_${i} i32`);
+            }
             result.push(...instructions);
             result.push(`get compiler_${tempIndex}`);
             result.push(`set ${target}`);
