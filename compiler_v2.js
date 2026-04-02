@@ -277,7 +277,7 @@ function preprocess(code) {
         result.push(`get compiler_${tempIndex}`);
         result.push(`set ${target}`);
     }
-
+    console.log(result)
     return result;
 }
 
