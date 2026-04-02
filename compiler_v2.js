@@ -216,7 +216,12 @@ function recursive_expand(expression, counter = { n: 0 }) {
 
     if (parsed.type === "identifier") {
         const t = counter.n++;
-        instructions.push(`get ${parsed.name}`);
+        if (parsed.name.startsWith('"') && parsed.name.endsWith('"')) {
+            const value = parsed.name.slice(1, -1);
+            instructions.push(`const ${value}`);
+        } else {
+            instructions.push(`get ${parsed.name}`);
+        }
         instructions.push(`set compiler_${t}`);
         return { instructions, tempIndex: t };
     }
