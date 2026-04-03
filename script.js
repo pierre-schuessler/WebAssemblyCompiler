@@ -443,7 +443,7 @@ async function runCommand(raw) {
     }
     
   } else if (verb === "test") {
-    args = parts.slice(1);
+    let args = parts.slice(1);
     print(test(...args));
     
   } else if (verb === "hex") {
