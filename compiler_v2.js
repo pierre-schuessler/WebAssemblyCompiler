@@ -210,185 +210,86 @@ function parseCall(str) {
   return { type: "call", name, args };
 }
 
-// ---------------------------------------------------------------------------
-// recursive_expand
-//
-// Now accepts two extra maps so it can resolve the type of locals and globals:
-//   localTypes  : Map<name, typeStr>   e.g. "x" -> "f64"
-//   globalTypes : Map<name, typeStr>   e.g. "myGlobal" -> "i64"
-//
-// Returns { instructions, tempIndex, tempType }
-//   tempType is the wasm value-type string ("i32" | "i64" | "f32" | "f64")
-//   of the value that ends up in compiler_<tempIndex>.
-// ---------------------------------------------------------------------------
-function recursive_expand(expression, counter = { n: 0 }, localTypes = new Map(), globalTypes = new Map()) {
-  const parsed = parseCall(expression);
-  const instructions = [];
+function recursive_expand(expression, counter = { n: 0 }) {
+    const parsed = parseCall(expression);
+    const instructions = [];
 
-  if (parsed.type === "identifier") {
-    const t = counter.n++;
-    let tempType = "i32"; // default / fallback
-
-    if (parsed.name.startsWith('"') && parsed.name.endsWith('"')) {
-      // String literal constant – i32 address
-      const value = parsed.name.slice(1, -1);
-      instructions.push(`const ${value}`);
-    } else if (parsed.name.startsWith("global ")) {
-      // global read:  "global myGlobal"
-      const gname = parsed.name.slice("global ".length).trim();
-      tempType = globalTypes.get(gname) ?? "i32";
-      instructions.push(`global.get ${gname}`);
-    } else {
-      // local read
-      tempType = localTypes.get(parsed.name) ?? "i32";
-      instructions.push(`get ${parsed.name}`);
+    if (parsed.type === "identifier") {
+        const t = counter.n++;
+        if (parsed.name.startsWith('"') && parsed.name.endsWith('"')) {
+            const value = parsed.name.slice(1, -1);
+            instructions.push(`const ${value}`);
+        }
+        else if (parsed.name.startsWith('global')){
+            const value = parsed.name.slice("global ".length);
+            instructions.push(`global.get ${value}`);
+        }
+        else {
+            instructions.push(`get ${parsed.name}`);
+        }
+        instructions.push(`set compiler_${t}`);
+        return { instructions, tempIndex: t };
     }
 
-    instructions.push(`set ${tempType} compiler_${t}`);
-    return { instructions, tempIndex: t, tempType };
-  }
+    const argTemps = [];
+    for (const arg of parsed.args) {
+        const result = recursive_expand(arg, counter);
+        instructions.push(...result.instructions);
+        argTemps.push(result.tempIndex);
+    }
 
-  // ── call node ─────────────────────────────────────────────────────────────
-  // Infer the output type from the function name if it carries a type prefix
-  // (e.g. "f64 add", "i64 mul").  Falls back to i32.
-  const callWords = parsed.name.trim().split(/\s+/);
-  const validTypes = ["i32", "i64", "f32", "f64"];
-  const inferredType = (callWords.length > 1 && validTypes.includes(callWords[0]))
-    ? callWords[0]
-    : "i32";
+    for (const t of argTemps) {
+        instructions.push(`get compiler_${t}`);
+    }
+    instructions.push(parsed.name);
+    const t = counter.n++;
+    instructions.push(`set compiler_${t}`);
 
-  const argTemps = [];
-  for (const arg of parsed.args) {
-    const result = recursive_expand(arg, counter, localTypes, globalTypes);
-    instructions.push(...result.instructions);
-    argTemps.push(result);
-  }
-
-  for (const { tempIndex } of argTemps) {
-    instructions.push(`get compiler_${tempIndex}`);
-  }
-  instructions.push(parsed.name);
-
-  const t = counter.n++;
-  instructions.push(`set ${inferredType} compiler_${t}`);
-
-  return { instructions, tempIndex: t, tempType: inferredType };
+    return { instructions, tempIndex: t };
 }
 
-// ---------------------------------------------------------------------------
-// preprocess
-//
-// Changes vs original:
-//  1. Builds localTypes / globalTypes maps as declarations are encountered.
-//  2. Passes those maps into recursive_expand.
-//  3. Uses the returned tempType when emitting `local compiler_N <type>`.
-//  4. Uses the target variable's known type (or the expression's tempType)
-//     when emitting the final `set` for the assignment target.
-//  5. Handles  "global <name> = <expr>"  for global.set sugar.
-// ---------------------------------------------------------------------------
 function preprocess(code) {
-  let lines = code
-    .split("\n")
-    .map((l) => l.replace(/;.*$/, "").trim())
-    .filter((l) => l.length > 0);
+    let lines = code
+        .split("\n")
+        .map((l) => l.replace(/;.*$/, "").trim())
+        .filter((l) => l.length > 0);
 
-  const counter    = { n: 0 };
-  const tempTypes  = new Map();   // compiler_N -> typeStr
-  const localTypes = new Map();   // local name  -> typeStr
-  const globalTypes= new Map();   // global name -> typeStr
-  const declaredLocals = new Set();
-  const result = [];
+    const counter = { n: 0 };
+    const declaredLocals = new Set();
+    const result = [];
 
-  for (const line of lines) {
-
-    // ── global declarations: record type, pass through ─────────────────────
-    if (line.startsWith("global")) {
-      if (line.includes("=")) {
-        // fall through to the assignment logic below
-      } else {
-        // declaration — parse and record type
-        const words = line.split(/\s+/);
-        let j = 1;
-        if (words[j] === "mut") j++;
-        if (TYPEMAP[words[j]] == null) {
-          const gname = words[j++];
-          const gtype = words[j] ?? "i32";
-          globalTypes.set(gname, gtype);
+    for (const line of lines) {
+        // Pass through non-assignment lines unchanged
+        if (!line.includes("=") || line.startsWith("export") || line.startsWith("import") || line.startsWith("global")) {
+            result.push(line);
+            continue;
         }
-        result.push(line);
-        continue;
-      }
+        
+
+        const eqIdx = line.indexOf("=");
+        const target = line.slice(0, eqIdx).trim();
+        const expression = line.slice(eqIdx + 1).trim();
+
+        const beforeCount = counter.n;
+        const { instructions, tempIndex } = recursive_expand(expression, counter);
+
+        // Declare any new compiler temps that were created
+        for (let i = beforeCount; i < counter.n; i++) {
+            result.push(`local compiler_${i} i32`);
+        }
+
+        // Declare the target variable if we haven't seen it before
+        if (!declaredLocals.has(target)) {
+            result.push(`local ${target} i32`);
+            declaredLocals.add(target);
+        }
+
+        result.push(...instructions);
+        result.push(`get compiler_${tempIndex}`);
+        result.push(`set ${target}`);
     }
-
-    // ── local declarations: record type, pass through ──────────────────────
-    if (line.startsWith("local ")) {
-      const words = line.split(/\s+/);
-      // Syntax: local [name] <type>
-      if (words.length >= 3) {
-        // local <name> <type>
-        localTypes.set(words[1], words[words.length - 1]);
-      }
-      declaredLocals.add(words[1]);
-      result.push(line);
-      continue;
-    }
-
-    // ── pass-through lines with no assignment ──────────────────────────────
-    if (!line.includes("=") || line.startsWith("export") || line.startsWith("import")) {
-      result.push(line);
-      continue;
-    }
-
-    // ── assignment lines ───────────────────────────────────────────────────
-    const eqIdx    = line.indexOf("=");
-    const lhs      = line.slice(0, eqIdx).trim();
-    const expression = line.slice(eqIdx + 1).trim();
-
-    // Check for global assignment:  "global <name> = <expr>"
-    const isGlobalAssign = lhs.startsWith("global ");
-    const targetName = isGlobalAssign ? lhs.slice("global ".length).trim() : lhs;
-
-    const beforeCount = counter.n;
-    const { instructions, tempIndex, tempType } =
-      recursive_expand(expression, counter, localTypes, globalTypes);
-
-    // Declare new compiler temps with their correct types
-    for (let i = beforeCount; i < counter.n; i++) {
-      const tt = tempTypes.get(`compiler_${i}`) ?? "i32";
-      if (!declaredLocals.has(`compiler_${i}`)) {
-        result.push(`local compiler_${i} ${tt}`);
-        declaredLocals.add(`compiler_${i}`);
-      }
-    }
-    // Record the type of the result temp now that we know it
-    tempTypes.set(`compiler_${tempIndex}`, tempType);
-    // Patch the last local declaration if it was emitted with the wrong type
-    // (it was added in the loop above before tempType was known for the result slot)
-    // Simpler: re-declare only the result temp with the correct type right here
-    // if it wasn't declared yet (it always is, since beforeCount..counter.n covers it).
-
-    if (isGlobalAssign) {
-      // global.set – no local declaration needed for the target
-      result.push(...instructions);
-      result.push(`get compiler_${tempIndex}`);
-      result.push(`global.set ${targetName}`);
-    } else {
-      // Declare the target local if first time seen
-      if (!declaredLocals.has(targetName)) {
-        const varType = tempType; // inherit from RHS
-        result.push(`local ${targetName} ${varType}`);
-        localTypes.set(targetName, varType);
-        declaredLocals.add(targetName);
-      }
-
-      result.push(...instructions);
-      result.push(`get compiler_${tempIndex}`);
-      result.push(`set ${targetName}`);
-    }
-  }
-
-  console.log(result);
-  return result;
+    console.log(result)
+    return result;
 }
 
 function process(words, tmp, globalNames, imports) {
