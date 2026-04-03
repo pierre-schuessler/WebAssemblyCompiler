@@ -1,4 +1,4 @@
-import { compile } from "./compiler_v2.js";
+import { compile, test } from "./compiler_v2.js";
 
 // ── PANEL RESIZE ──────────────────────────────────
 
