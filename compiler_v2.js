@@ -689,6 +689,11 @@ export function compile(code) {
 export function test(funct){
   switch (funct){
     case "flatten":
-      return flatten("x = add([mul([a],[b])], [c])");
+      let input = "x = add([mul([a],[b])], [mul([c],[d])])";
+      let result = "Flatten function tester - Input: ";
+      result += input;
+      result += "\n"
+      result += flatten(input)
+      return ;
   }
 }
