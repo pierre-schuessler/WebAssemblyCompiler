@@ -219,7 +219,12 @@ function recursive_expand(expression, counter = { n: 0 }) {
         if (parsed.name.startsWith('"') && parsed.name.endsWith('"')) {
             const value = parsed.name.slice(1, -1);
             instructions.push(`const ${value}`);
-        } else {
+        }
+        else if (parsed.name.startsWith('global')){
+            const value = parsed.name.slice("global ".length);
+            instructions.push(`global.get ${value}`);
+        }
+        else {
             instructions.push(`get ${parsed.name}`);
         }
         instructions.push(`set compiler_${t}`);
@@ -259,6 +264,7 @@ function preprocess(code) {
             result.push(line);
             continue;
         }
+        
 
         const eqIdx = line.indexOf("=");
         const target = line.slice(0, eqIdx).trim();
