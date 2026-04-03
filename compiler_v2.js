@@ -288,7 +288,7 @@ function flatten(line) {
         }
       } else if (char === "," && level === 0) {
         continue;
-      } else if (char === ")") {
+      } else if (char === ")" && level === 0) {
         break;
       } else {
         if (level >= 1) temp += char;
