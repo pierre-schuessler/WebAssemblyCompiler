@@ -686,14 +686,19 @@ export function compile(code) {
   return result;
 }
 
-export function test(funct){
-  switch (funct){
+export function test(funct) {
+  switch (funct) {
     case "flatten":
-      let input = "x = add([mul([a],[b])], [mul([c],[d])])";
+      const input = "x = add([mul([a],[b])], [mul([c],[d])])";
       let result = "Flatten function tester - Input: ";
       result += input;
-      result += "\n"
-      result += flatten(input)
-      return ;
+      result += "\nOutput: ";
+      // Make sure flatten is defined
+      result += flatten(input);
+      console.log(result); // or return result;
+      return result; // return the result if you want
+    default:
+      console.log("No test available for this function.");
+      return "No test available for this function.";
   }
 }
