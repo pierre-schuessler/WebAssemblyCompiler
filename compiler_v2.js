@@ -248,23 +248,118 @@ function recursive_expand(expression, counter = { n: 0 }) {
     return { instructions, tempIndex: t };
 }
 
+
+let tempCounter = 0;
+
+function flatten(line) { 
+  let output = [];
+
+  const expression = line.includes("=")
+    ? line.substring(line.indexOf("=") + 1).trim()
+    : line.trim();
+
+  let funct = "";
+  let args = [];
+  let temp = "";
+  let level = 0;
+  let i = 0;
+
+  // Extract function name
+  while (i < expression.length && expression[i] !== "(") {
+    funct += expression[i];
+    i++;
+  }
+
+  funct = funct.trim();
+  i++; // skip "("
+
+  // Parse arguments
+  for (; i < expression.length; i++) {
+    const char = expression[i];
+
+    if (char === "[") {
+      if (level > 0) temp += char;
+      level++;
+    } 
+    else if (char === "]") {
+      level--;
+
+      if (level > 0) {
+        temp += char;
+      } else {
+        args.push(temp.trim());
+        temp = "";
+      }
+    } 
+    else if (char === "," && level === 0) {
+      continue;
+    } 
+    else if (char === ")") {
+      break;
+    } 
+    else {
+      if (level > 0) temp += char;
+    }
+  }
+
+  // Process arguments recursively
+  let tempVars = [];
+
+  args.forEach((arg) => {
+    const tempName = `temp_${tempCounter++}`;
+
+    // Recursively flatten nested expressions
+    const inner = flatten(arg);
+
+    if (inner) {
+      output.push(inner);
+    }
+
+    output.push(`${tempName} = ${arg}`);
+    tempVars.push(tempName);
+  });
+
+  // Final function call
+  output.push(`${funct}(${tempVars.join(", ")})`);
+
+  return output.join("\n");
+}
+
+
 function preprocess(code) {
+    // cleanup
     let lines = code
         .split("\n")
         .map((l) => l.replace(/;.*$/, "").trim())
         .filter((l) => l.length > 0);
+      
+    
+    // flattening: turn something like var = add(sub(a, b), c) into "temp_n = sub(a, b)\n var = add(temp_n, c)
+
+
+
+    // evaluating: turn something like temp_n add(a, b) into "get a\ngetb\nadd\nset temp_n
+
+
+    // artificialize: turn variable names into numbers
+
 
     const counter = { n: 0 };
     const declaredLocals = new Set();
+    const declaredGlobals = {};
     const result = [];
 
     for (const line of lines) {
         // Pass through non-assignment lines unchanged
-        if (!line.includes("=") || line.startsWith("export") || line.startsWith("import") || line.startsWith("global")) {
+        if (!line.includes("=") || line.startsWith("export") || line.startsWith("import") ) {
             result.push(line);
             continue;
         }
         
+        if (line.startsWith("global")){
+
+        }
+
 
         const eqIdx = line.indexOf("=");
         const target = line.slice(0, eqIdx).trim();
@@ -289,31 +384,8 @@ function preprocess(code) {
         result.push(`set ${target}`);
     }
     console.log(result)
+
     return result;
-}
-
-function process(words, tmp, globalNames, imports) {
-  const resolved = [...words];
-
-  if (["get", "set", "tee"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
-    const idx = tmp.locals.findIndex(([name]) => name === resolved[1]);
-    if (idx === -1) throw new Error(`Unknown local: '${resolved[1]}'`);
-    resolved[1] = String(idx);
-  }
-
-  if (["global.get", "global.set"].includes(resolved[0]) && isNaN(Number(resolved[1]))) {
-    const idx = globalNames.indexOf(resolved[1]);
-    if (idx === -1) throw new Error(`Unknown global: '${resolved[1]}'`);
-    resolved[1] = String(idx);
-  }
-
-  if (resolved[0] === "call" && isNaN(Number(resolved[1]))) {
-    const idx = imports.findIndex((imp) => imp.localName === resolved[1]);
-    if (idx === -1) throw new Error(`Unknown import: '${resolved[1]}'`);
-    resolved[1] = String(idx);
-  }
-
-  return resolved;
 }
 
 
@@ -618,4 +690,12 @@ export function compile(code) {
   exports.forEach((e, idx) => { meta[e.name] = types[functions[idx]].inputs.length; });
   result.meta = meta;
   return result;
+}
+
+export function test(funct){
+  switch (funct){
+    case "flatten":
+      return flatten("x = add([mul([a],[b])], [c])");
+      break;
+  }
 }

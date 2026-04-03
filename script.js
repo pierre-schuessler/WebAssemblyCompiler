@@ -413,6 +413,7 @@ async function runCommand(raw) {
           }
         }
       }
+      
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
     }
@@ -440,6 +441,11 @@ async function runCommand(raw) {
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
     }
+    
+  } else if (verb === "test") {
+    args = parts.slice(1);
+    print(test(...args));
+    
   } else if (verb === "hex") {
     if (!lastBinary) {
       print(`<span class="c-warn">⚠ run build first</span>`);
