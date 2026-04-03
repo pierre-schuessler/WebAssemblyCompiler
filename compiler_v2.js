@@ -692,7 +692,7 @@ export function test(funct) {
       const input = "x = add([mul([a],[b])], [mul([c],[d])])";
       let result = "Flatten function tester - Input: ";
       result += input;
-      result += "\nOutput: ";
+      result += "\nOutput: \n";
       // Make sure flatten is defined
       result += flatten(input);
       console.log(result); // or return result;
