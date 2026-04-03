@@ -249,82 +249,76 @@ function recursive_expand(expression, counter = { n: 0 }) {
 }
 
 
-let tempCounter = 0;
-
-function flatten(line) { 
+function flatten(line) {
   let output = [];
+  let tempIndex = 0; // hoisted so sibling recursive calls don't reset it
 
-  const expression = line.includes("=")
-    ? line.substring(line.indexOf("=") + 1).trim()
-    : line.trim();
+  let lhs = null;
+  if (line.includes("=")) {
+    const parts = line.split("=");
+    lhs = parts[0].trim();
+    line = parts[1].trim();
+  }
 
-  let funct = "";
-  let args = [];
-  let temp = "";
-  let level = 0;
-  let i = 0;
+  function _flatten(expr) {
+    const args = [];
+    let funct = "";
+    let temp = "";
+    let level = 0;
+    let i = 0;
 
-  // Extract function name
-  while (i < expression.length && expression[i] !== "(") {
-    funct += expression[i];
+    while (i < expr.length && expr[i] !== "(") {
+      funct += expr[i];
+      i++;
+    }
+    funct = funct.trim();
     i++;
-  }
 
-  funct = funct.trim();
-  i++; // skip "("
-
-  // Parse arguments
-  for (; i < expression.length; i++) {
-    const char = expression[i];
-
-    if (char === "[") {
-      if (level > 0) temp += char;
-      level++;
-    } 
-    else if (char === "]") {
-      level--;
-
-      if (level > 0) {
-        temp += char;
+    for (; i < expr.length; i++) {
+      const char = expr[i];
+      if (char === "[") {
+        level++;
+        if (level > 1) temp += char;
+      } else if (char === "]") {
+        if (level > 1) temp += char;
+        level--;
+        if (level === 0) {
+          args.push(temp.trim());
+          temp = "";
+        }
+      } else if (char === "," && level === 0) {
+        continue;
+      } else if (char === ")") {
+        break;
       } else {
-        args.push(temp.trim());
-        temp = "";
+        if (level >= 1) temp += char;
       }
-    } 
-    else if (char === "," && level === 0) {
-      continue;
-    } 
-    else if (char === ")") {
-      break;
-    } 
-    else {
-      if (level > 0) temp += char;
     }
+
+    const tempVars = [];
+    for (let j = 0; j < args.length; j++) {
+      const arg = args[j];
+      const tempName = `temp_${tempIndex++}`; // never resets
+      if (arg.includes("(")) {
+        const innerExpr = _flatten(arg);
+        output.push(`${tempName} = ${innerExpr}`);
+      } else {
+        output.push(`${tempName} = ${arg}`);
+      }
+      tempVars.push(tempName);
+    }
+
+    return `${funct}(${tempVars.join(", ")})`;
   }
 
-  // Process arguments recursively
-  let tempVars = [];
-
-  args.forEach((arg) => {
-    const tempName = `temp_${tempCounter++}`;
-
-    // Recursively flatten nested expressions
-    const inner = flatten(arg);
-
-    if (inner) {
-      output.push(inner);
-    }
-
-    output.push(`${tempName} = ${arg}`);
-    tempVars.push(tempName);
-  });
-
-  // Final function call
-  output.push(`${funct}(${tempVars.join(", ")})`);
-
-  return output.join("\n");
+  const resultExpr = _flatten(line);
+  if (lhs) {
+    output.push(`${lhs} = ${resultExpr}`);
+  } else {
+    output.push(resultExpr);
+  }
+  return output.join(";\n");
 }
-
 
 function preprocess(code) {
     // cleanup
@@ -696,6 +690,5 @@ export function test(funct){
   switch (funct){
     case "flatten":
       return flatten("x = add([mul([a],[b])], [c])");
-      break;
   }
 }
