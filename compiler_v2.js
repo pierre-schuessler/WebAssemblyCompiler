@@ -303,20 +303,21 @@ function preprocess(code) {
 
     // ── global declarations: record type, pass through ─────────────────────
     if (line.startsWith("global")) {
-      const words = line.split(/\s+/);
-      // Syntax variants:
-      //   global [mut] <name> <type> [initval]
-      //   global [mut] <type> [initval]          (anonymous)
-      let j = 1;
-      if (words[j] === "mut") j++;
-      // If next token is NOT a known type, it's the name
-      if (TYPEMAP[words[j]] == null) {
-        const gname = words[j++];
-        const gtype = words[j] ?? "i32";
-        globalTypes.set(gname, gtype);
+      if (line.includes("=")) {
+        // fall through to the assignment logic below
+      } else {
+        // declaration — parse and record type
+        const words = line.split(/\s+/);
+        let j = 1;
+        if (words[j] === "mut") j++;
+        if (TYPEMAP[words[j]] == null) {
+          const gname = words[j++];
+          const gtype = words[j] ?? "i32";
+          globalTypes.set(gname, gtype);
+        }
+        result.push(line);
+        continue;
       }
-      result.push(line);
-      continue;
     }
 
     // ── local declarations: record type, pass through ──────────────────────
