@@ -456,26 +456,29 @@ function artificialize(lines) {
     }
   }
 
-  // Second pass: register everything else in order
+  // FIX #3: Second pass registers all locals by scanning lhs of assignments
+  // and `local` declarations — no overly-narrow filter that would miss
+  // user-defined variable names.
   for (const line of lines) {
     const t = line.trim();
     if (t.startsWith("export") || t.startsWith("global")) continue;
-    const allVars = [...t.matchAll(/\$?(\b\w+\b)/g)]
-      .map(m => m[1])
-      .filter(n => n in indexMap || /^(temp_\d+|var\b)/.test(n));
-    for (const name of allVars) assign(name);
-    // Also catch lhs of assignments directly
+
+    // Register names declared via `local <type> <name>`
+    const localDeclM = t.match(/^local\s+\S+\s+(\w+)$/);
+    if (localDeclM) { assign(localDeclM[1]); continue; }
+
+    // Register the lhs of any assignment
     const lhsM = t.match(/(?:\w+\s+)?(\w+)\s*=/);
     if (lhsM) assign(lhsM[1]);
   }
 
-  // Replace every $name reference and local.get/set targets
+  // Replace every $name reference
   return lines.map(line => {
     const t = line.trim();
     if (t.startsWith("export") || t.startsWith("global")) return line;
 
     return line.replace(/\$(\w+)/g, (_, name) => {
-      assign(name); // ensure late-seen names still get an index
+      assign(name); // ensure any late-seen names still get an index
       return String(indexMap[name]);
     });
   });
@@ -677,9 +680,12 @@ export function compile(code) {
 
       case "local": {
         if (tmp) {
+          // FIX #2: words[1] is the type, words[2] is the name (when present).
+          // Previously this read words[1] for the name when length > 2, which
+          // grabbed the type string instead of the actual variable name.
           const valtype = TYPEMAP[words[1]];
-          const name = words.length > 2 ? words[1] : `$${tmp.locals.length}`;
-          if (valtype == null) throw new Error(`Unknown local type: ${words[words.length - 1]}`);
+          if (valtype == null) throw new Error(`Unknown local type: ${words[1]}`);
+          const name = words.length > 2 ? words[2] : `$${tmp.locals.length}`;
           tmp.locals.push([name, valtype]);
         }
         break;
@@ -687,7 +693,10 @@ export function compile(code) {
 
       default: {
         if (tmp) {
-          tmp.binary.push(...encodeWasmInstruction((words, tmp, globalNames, imports)));
+          // FIX #1: was `encodeWasmInstruction((words, tmp, globalNames, imports))`
+          // The extra parentheses made it a comma expression, passing only
+          // `imports` (the last operand) instead of the `words` array.
+          tmp.binary.push(...encodeWasmInstruction(words));
         }
         break;
       }
@@ -826,10 +835,9 @@ export function test(funct) {
       let result = "Flatten function tester - Input: ";
       result += input;
       result += "\nOutput: \n";
-      // Make sure flatten is defined
       result += flatten(input);
-      console.log(result); // or return result;
-      return result; // return the result if you want
+      console.log(result);
+      return result;
     case "prepro":{
       const input = `
         export add2 f32 x f32 y => f32
