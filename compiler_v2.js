@@ -831,12 +831,9 @@ export function test(funct) {
       return result; // return the result if you want
     case "prepro":{
       const input = `
-        global i32 name
-
-        export name f32 arg1 f32 arg2 f32 arg3 => f32
-        temp_0 = operation([arg2],[arg2])
-        var = operation([arg1], [temp_0])
-        return var
+        export add2 f32 x f32 y => f32
+          var = add([x], [y])
+          return var
         `.trim();
 
       return preprocess(input);
