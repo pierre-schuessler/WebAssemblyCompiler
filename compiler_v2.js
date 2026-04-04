@@ -511,7 +511,7 @@ function preprocess(code) {
   lines = artificialize(lines);
   console.log("after artificialize:", lines);
 
-  return lines.join("\n");
+  return lines;
 }
 
 export function compile(code) {
