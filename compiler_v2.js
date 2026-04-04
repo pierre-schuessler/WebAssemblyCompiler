@@ -611,6 +611,7 @@ function artificialize(lines) {
     funcLines.push(line);
     i++;
 
+    // Consume all lines belonging to this function
     while (i < lines.length && !lines[i].trim().startsWith("export ")) {
       funcLines.push(lines[i]);
       i++;
@@ -618,7 +619,7 @@ function artificialize(lines) {
 
     // ---- 2. Per-function locals ----
     const indexMap = {};
-    let nextIndex = 0; // reset per function
+    let nextIndex = 0; // Reset for every new function block
 
     function assign(name) {
       if (!(name in indexMap)) {
@@ -626,28 +627,31 @@ function artificialize(lines) {
       }
     }
 
-    // ---- 2a. Parse parameters ----
+    // ---- 2a. Parse parameters from the header ----
     const header = funcLines[0].trim();
-    const tokens = header.slice(7).trim().split(/\s+/);
+    // Remove 'export ' and split to handle: export funcName type paramName => returnType
+    const headerTokens = header.replace(/^export\s+/, "").split(/\s+/);
+    
+    // headerTokens[0] is the function name. Params start at index 1.
     let j = 1;
+    while (j < headerTokens.length && headerTokens[j] !== '=>') {
+      const type = headerTokens[j];
+      const name = headerTokens[j + 1];
 
-    // Only parse if parameters exist
-    if (tokens[j] !== '=>') {
-      while (j < tokens.length && tokens[j] !== '=>') {
-        const type = tokens[j];
-        const name = tokens[j + 1];
-
-        if (name && name !== '=>') {
-          assign(name);
-        }
-
-        j += 2;
+      if (name && name !== '=>') {
+        assign(name);
+        j += 2; // Move past type and name
+      } else {
+        break;
       }
     }
 
-    // ---- 2b. Collect locals from declarations and assignments ----
+    // ---- 2b. Collect locals from declarations and $assignments ----
     for (const l of funcLines) {
       const tt = l.trim();
+
+      // Skip non-body lines
+      if (tt.startsWith("export") || tt.startsWith("global ")) continue;
 
       // local declaration: local i32 temp
       const localDeclM = tt.match(/^local\s+\S+\s+(\w+)$/);
@@ -656,8 +660,9 @@ function artificialize(lines) {
         continue;
       }
 
-      // lhs assignment: temp = ...
-      const lhsM = tt.match(/(?:\w+\s+)?(\w+)\s*=/);
+      // Variable assignment: $name = ...
+      // We only assign names that start with $ to avoid bumping index on opcodes
+      const lhsM = tt.match(/\$(\w+)\s*=/);
       if (lhsM) {
         assign(lhsM[1]);
       }
@@ -667,29 +672,29 @@ function artificialize(lines) {
     for (const l of funcLines) {
       const tt = l.trim();
 
-      // Skip headers, import, global declaration
-      if (tt.startsWith("export") || tt.startsWith("import") || tt.startsWith("global ")) {
+      // Keep headers and global definitions as is
+      if (tt.startsWith("export") || tt.startsWith("global ")) {
         result.push(l);
         continue;
       }
 
-      // Replace global access
+      // Replace global access with global indices
       const globalGetM = tt.match(/^global\.get\s+(\w+)$/);
       if (globalGetM) {
-        result.push(`global.get ${globalIndexMap[globalGetM[1]] ?? 0}`);
+        result.push(l.replace(globalGetM[1], globalIndexMap[globalGetM[1]] ?? 0));
         continue;
       }
 
       const globalSetM = tt.match(/^global\.set\s+(\w+)$/);
       if (globalSetM) {
-        result.push(`global.set ${globalIndexMap[globalSetM[1]] ?? 0}`);
+        result.push(l.replace(globalSetM[1], globalIndexMap[globalSetM[1]] ?? 0));
         continue;
       }
 
-      // Replace locals $name with index
+      // Replace locals $name with the assigned numeric index
       result.push(
         l.replace(/\$(\w+)/g, (_, name) => {
-          assign(name);
+          assign(name); // Safety check if missed in scan
           return String(indexMap[name]);
         })
       );
