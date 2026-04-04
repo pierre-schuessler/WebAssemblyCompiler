@@ -321,70 +321,64 @@ function flatten(line) {
 }
 
 function inferWasmTypes(lines) {
-  const typeMap = {};           // varName → wasmType
+  const typeMap = {};
 
-  // ── Pass 1: harvest known types from declarations ────────────────────────
-
+  // Pass 1: harvest types from global/export declarations (unchanged)
   for (const line of lines) {
     const t = line.trim();
-
-    // global <type> <name>
     const globalM = t.match(/^global\s+(\S+)\s+(\S+)/);
-    if (globalM) {
-      const [, type, name] = globalM;
-      typeMap[name] = type;
-      continue;
-    }
+    if (globalM) { typeMap[globalM[2]] = globalM[1]; continue; }
 
-    // export <funcName>  <type> <arg>  <type> <arg> … => <returnType>
     if (t.startsWith('export ')) {
       const tokens = t.slice(7).trim().split(/\s+/);
-      // tokens[0] = funcName, then alternating type/arg pairs until '=>'
       let i = 1;
       while (i < tokens.length && tokens[i] !== '=>') {
-        const type    = tokens[i];
-        const argName = tokens[i + 1];
-        if (argName && argName !== '=>') {
-          typeMap[argName] = type;
-        }
+        if (tokens[i + 1] && tokens[i + 1] !== '=>') typeMap[tokens[i + 1]] = tokens[i];
         i += 2;
       }
-      // capture return type too (useful if you later annotate return statements)
-      if (tokens[i] === '=>' && tokens[i + 1]) {
-        typeMap['__return__'] = tokens[i + 1];
-      }
+      if (tokens[i] === '=>' && tokens[i + 1]) typeMap['__return__'] = tokens[i + 1];
     }
   }
 
-  // ── Pass 2: annotate assignments ─────────────────────────────────────────
-
+  // Pass 2: annotate assignments
   return lines.map(line => {
     const indent = line.match(/^(\s*)/)[1];
-    const t      = line.trim();
+    const t = line.trim();
 
-    // <varName> = <operation> <optionalSpace> ( <args> )
-    //   – args may contain [ref] references, raw literals, nested calls, etc.
-    const assignM = t.match(/^(\w+)\s*=\s*(\w+)(\s*)\((.+)\)\s*$/);
-    if (!assignM) return line;
+    // Shape 1: temp_0 = [arg2]
+    const copyM = t.match(/^(\w+)\s*=\s*\[(\w+)\]$/);
+    if (copyM) {
+      const [, varName, ref] = copyM;
+      const inferredType = typeMap[ref];
+      if (!inferredType) return line;
+      typeMap[varName] = inferredType;
+      return `${indent}${inferredType} ${varName} = [${ref}]`;
+    }
 
-    const [, varName, operation, spacer, argsStr] = assignM;
-
-    // Collect every [bracketedReference] from the argument list
+    // Shape 2: var = operation([a], [b])
+    const callM = t.match(/^(\w+)\s*=\s*(\w+)(\s*)\((.+)\)\s*$/);
+    if (!callM) return line;
+    const [, varName, operation, spacer, argsStr] = callM;
     const refs = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
-
-    // First ref whose type we already know determines the inferred type
     const inferredType = refs.map(r => typeMap[r]).find(t => t !== undefined);
-    if (inferredType === undefined) return line;   // can't infer → leave unchanged
-
-    // Propagate so later lines can use this variable's type
+    if (!inferredType) return line;
     typeMap[varName] = inferredType;
-
-    // Rebuild:  <type> <var> = <op> <type>(<args>)
     return `${indent}${inferredType} ${varName} = ${operation} ${inferredType}${spacer}(${argsStr})`;
   });
 }
 
 function preprocess(code) {
+    /*
+     const example_code = `
+        global i32 name
+
+        export name f32 arg1 f32 arg2 f32 arg3 => f32
+        temp_0 = operation([arg2],[arg2])
+        var = operation([arg1], [temp_0])
+        return var
+        `.trim();
+    */
+
     // cleanup
     let lines = code
         .split("\n")
