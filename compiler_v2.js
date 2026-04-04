@@ -374,7 +374,6 @@ function evaluate(lines) {
     const t = line.trim();
 
     if (t.startsWith("global") || t.startsWith("export")) {
-      // register params so we don't re-declare them
       if (t.startsWith("export")) {
         exportIdx = output.length;
         const tokens = t.slice(7).trim().split(/\s+/);
@@ -392,7 +391,7 @@ function evaluate(lines) {
 
     const returnM = t.match(/^return\s+(\w+)$/);
     if (returnM) {
-      output.push(`get ${returnM[1]}`);
+      output.push(`get $${returnM[1]}`);
       output.push(`return`);
       continue;
     }
@@ -406,8 +405,8 @@ function evaluate(lines) {
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
         exportIdx++;
       }
-      output.push(`get ${src}`);
-      output.push(`set ${dest}`);
+      output.push(`get $${src}`);
+      output.push(`set $${dest}`);
       continue;
     }
 
@@ -421,9 +420,9 @@ function evaluate(lines) {
         exportIdx++;
       }
       const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
-      for (const arg of args) output.push(`get ${arg}`);
+      for (const arg of args) output.push(`get $${arg}`);
       output.push(`${type} ${operation}`);
-      output.push(`set ${dest}`);
+      output.push(`set $${dest}`);
       continue;
     }
 
