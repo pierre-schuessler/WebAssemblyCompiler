@@ -248,7 +248,6 @@ function recursive_expand(expression, counter = { n: 0 }) {
     return { instructions, tempIndex: t };
 }
 
-
 function flatten(line) {
   let output = [];
   let tempIndex = 0;
@@ -303,14 +302,22 @@ function flatten(line) {
         const innerExpr = _flatten(arg);
         output.push(`${tempName} = ${innerExpr}`);
       } else {
-        output.push(`${tempName} = [${arg}]`); // ← wrap in []
+        output.push(`${tempName} = [${arg}]`);
       }
-      tempVars.push(`[${tempName}]`); // ← wrap in []
+      tempVars.push(tempName);
     }
 
-    return `${funct}([${tempVars.join("], [")}])`; // ← wrap each in []
+    return `${funct}(${tempVars.map(v => `[${v}]`).join(", ")})`;
   }
 
+  const resultExpr = _flatten(line);
+  if (lhs) {
+    output.push(`${lhs} = ${resultExpr}`);
+  } else {
+    output.push(resultExpr);
+  }
+
+  return output;
 }
 
 function inferWasmTypes(lines) {
@@ -399,7 +406,7 @@ function preprocess(code) {
         temp.push(line);
       } // TODO
       else {
-        temp.push(...flatten(line));
+        temp.push(...(flatten(line)));
       }
     })
     lines = temp;
