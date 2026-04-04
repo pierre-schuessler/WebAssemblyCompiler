@@ -251,7 +251,7 @@ function recursive_expand(expression, counter = { n: 0 }) {
 
 function flatten(line) {
   let output = [];
-  let tempIndex = 0; // hoisted so sibling recursive calls don't reset it
+  let tempIndex = 0;
 
   let lhs = null;
   if (line.includes("=")) {
@@ -298,43 +298,20 @@ function flatten(line) {
     const tempVars = [];
     for (let j = 0; j < args.length; j++) {
       const arg = args[j];
-      const tempName = `temp_${tempIndex++}`; // never resets
+      const tempName = `temp_${tempIndex++}`;
       if (arg.includes("(")) {
         const innerExpr = _flatten(arg);
         output.push(`${tempName} = ${innerExpr}`);
       } else {
-        output.push(`${tempName} = ${arg}`);
+        output.push(`${tempName} = [${arg}]`); // ← wrap in []
       }
-      tempVars.push(tempName);
+      tempVars.push(`[${tempName}]`); // ← wrap in []
     }
 
-    return `${funct}(${tempVars.join(", ")})`;
+    return `${funct}([${tempVars.join("], [")}])`; // ← wrap each in []
   }
 
-  const resultExpr = _flatten(line);
-  if (lhs) {
-    output.push(`${lhs} = ${resultExpr}`);
-  } else {
-    output.push(resultExpr);
-  }
-  return output;
-}
 
-
-/**
- * Infers WASM types for intermediate variables and annotates assignments.
- *
- * Supported type declarations (source of truth):
- *   global <type> <name>
- *   export <fn> <type> <arg> <type> <arg> ... => <type>
- *
- * Transformed lines:
- *   var = operation([ref1], [ref2])
- *   →  <type> var = operation <type>([ref1], [ref2])
- *
- * Type inference: the first [bracketed] argument whose type is already
- * known wins; type then propagates to the newly declared variable.
- */
 function inferWasmTypes(lines) {
   const typeMap = {};           // varName → wasmType
 
