@@ -317,7 +317,7 @@ function flatten(line) {
   } else {
     output.push(resultExpr);
   }
-  return output.join(";\n");
+  return output;
 }
 
 
