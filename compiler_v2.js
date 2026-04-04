@@ -320,51 +320,131 @@ function flatten(line) {
   return output;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// inferWasmTypes
+//
+// New in this version:
+//   Pass 0  – Builds a funcRegistry from `import` and `export` declarations,
+//              recording each function's call index and return type.
+//   Shape 1 – Handles quoted numeric literals ("5", "3.14") as typed constants.
+//             Integer literals → i32, floating-point literals → f32.
+//   Shape 2 – Detects calls to registered functions and rewrites them as
+//             `type dest = callfn INDEX(args)` so evaluate can emit `call N`.
+//   Shape 3 – Handles standalone void calls: `funcName(args)` with no lhs.
+// ─────────────────────────────────────────────────────────────────────────────
 function inferWasmTypes(lines) {
-  const typeMap = {};
+  const typeMap      = {};
+  const funcRegistry = {};          // name → { index, returnType }
+  const validTypes   = new Set(["i32", "i64", "f32", "f64"]);
+  let importCount = 0, exportCount = 0;
 
+  // ── Pass 0: collect global, import, and export signatures ────────────────
   for (const line of lines) {
     const t = line.trim();
+
+    // globals: `global [mut] type name [initval]`  (existing convention)
     const globalM = t.match(/^global\s+(\S+)\s+(\S+)/);
     if (globalM) { typeMap[globalM[2]] = globalM[1]; continue; }
 
-    if (t.startsWith('export ')) {
+    // imports: `import module.name [localName] [paramTypes] => [retType]`
+    if (t.startsWith('import ')) {
       const tokens = t.slice(7).trim().split(/\s+/);
+      let i = 1;                                      // skip tokens[0] = "module.name"
+      let localName = null;
+      if (tokens[i] && !validTypes.has(tokens[i]) && tokens[i] !== '=>')
+        localName = tokens[i++];
+      const arrow   = tokens.indexOf('=>');
+      const retType = (arrow !== -1 && tokens[arrow + 1]) ? tokens[arrow + 1] : null;
+      if (localName)
+        funcRegistry[localName] = { index: importCount, returnType: retType };
+      importCount++;
+      continue;
+    }
+
+    // exports: `export funcName [paramType paramName ...] => [retType]`
+    if (t.startsWith('export ')) {
+      const tokens   = t.slice(7).trim().split(/\s+/);
+      const funcName = tokens[0];
       let i = 1;
       while (i < tokens.length && tokens[i] !== '=>') {
-        if (tokens[i + 1] && tokens[i + 1] !== '=>') typeMap[tokens[i + 1]] = tokens[i];
-        i += 2;
+        if (tokens[i + 1] && tokens[i + 1] !== '=>') { typeMap[tokens[i + 1]] = tokens[i]; i += 2; }
+        else i++;
       }
-      if (tokens[i] === '=>' && tokens[i + 1]) typeMap['__return__'] = tokens[i + 1];
+      const arrow   = tokens.indexOf('=>');
+      const retType = (arrow !== -1 && tokens[arrow + 1]) ? tokens[arrow + 1] : null;
+      if (retType) typeMap['__return__'] = retType;
+      funcRegistry[funcName] = { index: importCount + exportCount, returnType: retType };
+      exportCount++;
     }
   }
 
+  // ── Helper: infer the WASM type of a quoted numeric literal ──────────────
+  // Floats contain '.' or an exponent; everything else is treated as i32.
+  const constType = raw =>
+    (raw.includes('.') || /[eE]/.test(raw)) ? 'f32' : 'i32';
+
+  // ── Pass 1: annotate variable types ──────────────────────────────────────
   return lines.map(line => {
     const indent = line.match(/^(\s*)/)[1];
-    const t = line.trim();
+    const t      = line.trim();
 
-    // Shape 1: temp_0 = [arg2]
-    const copyM = t.match(/^(\w+)\s*=\s*\[(\w+)\]$/);
+    // Shape 1 ── copy / constant:   varName = [ref]   or   varName = ["lit"]
+    // The [^\]]+ instead of \w+ allows quoted literals like ["3.14"] through.
+    const copyM = t.match(/^(\w+)\s*=\s*\[([^\]]+)\]$/);
     if (copyM) {
       const [, varName, ref] = copyM;
-      const inferredType = typeMap[ref];
+      const isConst      = ref.startsWith('"') && ref.endsWith('"');
+      const inferredType = isConst ? constType(ref.slice(1, -1)) : typeMap[ref];
       if (!inferredType) return line;
       typeMap[varName] = inferredType;
       return `${indent}${inferredType} ${varName} = [${ref}]`;
     }
 
-    // Shape 2: var = operation([a], [b])
-    const callM = t.match(/^(\w+)\s*=\s*(\w+)(\s*)\((.+)\)\s*$/);
-    if (!callM) return line;
-    const [, varName, operation, spacer, argsStr] = callM;
-    const refs = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
-    const inferredType = refs.map(r => typeMap[r]).find(t => t !== undefined);
-    if (!inferredType) return line;
-    typeMap[varName] = inferredType;
-    return `${indent}${inferredType} ${varName} = ${operation} ${inferredType}${spacer}(${argsStr})`;
+    // Shape 2 ── assigned call:   varName = operation([a], [b])
+    const callM = t.match(/^(\w+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
+    if (callM) {
+      const [, varName, operation, argsStr] = callM;
+
+      // ── Registered function call (import or sibling export) ──────────────
+      // Rewritten as `type dest = callfn INDEX(args)` so evaluate can emit
+      // `call INDEX` directly.  Void functions use the sentinel type "void".
+      if (funcRegistry[operation]) {
+        const { index, returnType } = funcRegistry[operation];
+        const type = (returnType && validTypes.has(returnType)) ? returnType : 'void';
+        if (type !== 'void') typeMap[varName] = type;
+        return `${indent}${type} ${varName} = callfn ${index}(${argsStr})`;
+      }
+
+      // ── WASM instruction: infer type from argument variables ──────────────
+      const refs         = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
+      const inferredType = refs.map(r => typeMap[r]).find(tp => tp !== undefined);
+      if (!inferredType) return line;
+      typeMap[varName] = inferredType;
+      return `${indent}${inferredType} ${varName} = ${operation} ${inferredType}(${argsStr})`;
+    }
+
+    // Shape 3 ── standalone void call:   funcName([a], [b])   (no lhs)
+    // Produced by flatten when a void function is called as a statement.
+    const voidM = t.match(/^([\w.]+)\s*\((.+)\)\s*$/);
+    if (voidM && funcRegistry[voidM[1]]) {
+      const { index } = funcRegistry[voidM[1]];
+      return `${indent}callfn ${index}(${voidM[2]})`;
+    }
+
+    return line;
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// evaluate
+//
+// New in this version:
+//   Shape 1 – Detects quoted-literal sources ("5", "3.14") and emits a typed
+//             `const` instruction instead of a `get` for a local variable.
+//   Shape 2 – Distinguishes `callfn INDEX(args)` from ordinary WASM ops and
+//             emits `call INDEX`; skips `set` for void-return calls.
+//   Shape 3 – Handles standalone `callfn INDEX(args)` lines (no dest).
+// ─────────────────────────────────────────────────────────────────────────────
 function evaluate(lines) {
   const output = [];
   const knownLocals = new Set();
@@ -396,33 +476,60 @@ function evaluate(lines) {
       continue;
     }
 
-    // Shape 1 — typed copy:  f32 temp_0 = [arg2]
-    const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*\[(\w+)\]$/);
+    // Shape 1 ── typed copy or constant:   type dest = [src]   or   type dest = ["lit"]
+    // [^\]]+ allows quoted literals through the regex.
+    const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*\[([^\]]+)\]$/);
     if (copyM) {
       const [, type, dest, src] = copyM;
+      if (type === 'void') continue;                    // void placeholder — skip entirely
       if (!knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
         exportIdx++;
       }
-      output.push(`get $${src}`);
+      const isConst = src.startsWith('"') && src.endsWith('"');
+      if (isConst) {
+        // Emit a typed `const` instruction; the literal value is the raw number.
+        output.push(`const ${type} ${src.slice(1, -1)}`);
+      } else {
+        output.push(`get $${src}`);
+      }
       output.push(`set $${dest}`);
       continue;
     }
 
-    // Shape 2 — typed call:  f32 var = operation f32([a], [b])
+    // Shape 2 ── typed call:   type dest = operation opType(args)
+    //            or callfn:    type dest = callfn index(args)
+    // Note: for callfn, `_opType` carries the numeric function index, not a type.
     const callM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\w+)\s+(\w+)\s*\((.+)\)$/);
     if (callM) {
       const [, type, dest, operation, _opType, argsStr] = callM;
-      if (!knownLocals.has(dest)) {
+      if (type !== 'void' && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
         exportIdx++;
       }
       const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
       for (const arg of args) output.push(`get $${arg}`);
-      output.push(`${operation} ${type}`);
-      output.push(`set $${dest}`);
+      if (operation === 'callfn') {
+        // _opType is the function index; emit `call N` and skip `set` for void.
+        output.push(`call ${_opType}`);
+        if (type !== 'void') output.push(`set $${dest}`);
+      } else {
+        output.push(`${operation} ${type}`);
+        output.push(`set $${dest}`);
+      }
+      continue;
+    }
+
+    // Shape 3 ── standalone void call (no dest):   callfn index([a], [b])
+    // Produced by inferWasmTypes Shape 3 for void-return function statements.
+    const voidCallM = t.match(/^callfn\s+(\d+)\((.+)\)$/);
+    if (voidCallM) {
+      const [, index, argsStr] = voidCallM;
+      const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
+      for (const arg of args) output.push(`get $${arg}`);
+      output.push(`call ${index}`);
       continue;
     }
 
@@ -433,9 +540,6 @@ function evaluate(lines) {
 }
 
 function artificialize(lines) {
-  // Collect all local variable names in order of first appearance.
-  // Parameters from `export` come first (they occupy the first local indices in WASM),
-  // then every other variable in declaration order.
   const indexMap = {};
   let nextIndex = 0;
 
@@ -443,7 +547,6 @@ function artificialize(lines) {
     if (!(name in indexMap)) indexMap[name] = nextIndex++;
   }
 
-  // First pass: register params from export declaration first
   for (const line of lines) {
     const t = line.trim();
     if (t.startsWith("export ")) {
@@ -456,29 +559,23 @@ function artificialize(lines) {
     }
   }
 
-  // FIX #3: Second pass registers all locals by scanning lhs of assignments
-  // and `local` declarations — no overly-narrow filter that would miss
-  // user-defined variable names.
   for (const line of lines) {
     const t = line.trim();
-    if (t.startsWith("export") || t.startsWith("global")) continue;
+    if (t.startsWith("export") || t.startsWith("global") || t.startsWith("import")) continue;
 
-    // Register names declared via `local <type> <name>`
     const localDeclM = t.match(/^local\s+\S+\s+(\w+)$/);
     if (localDeclM) { assign(localDeclM[1]); continue; }
 
-    // Register the lhs of any assignment
     const lhsM = t.match(/(?:\w+\s+)?(\w+)\s*=/);
     if (lhsM) assign(lhsM[1]);
   }
 
-  // Replace every $name reference
   return lines.map(line => {
     const t = line.trim();
-    if (t.startsWith("export") || t.startsWith("global")) return line;
+    if (t.startsWith("export") || t.startsWith("global") || t.startsWith("import")) return line;
 
     return line.replace(/\$(\w+)/g, (_, name) => {
-      assign(name); // ensure any late-seen names still get an index
+      assign(name);
       return String(indexMap[name]);
     });
   });
@@ -493,7 +590,7 @@ function preprocess(code) {
   // Flatten nested calls into temp vars
   let temp = [];
   lines.forEach((line) => {
-    if (line.startsWith("export") || line.startsWith("global") || line.startsWith("return")) {
+    if (line.startsWith("export") || line.startsWith("global") || line.startsWith("import") || line.startsWith("return")) {
       temp.push(line);
     } else {
       temp.push(...flatten(line));
@@ -680,9 +777,6 @@ export function compile(code) {
 
       case "local": {
         if (tmp) {
-          // FIX #2: words[1] is the type, words[2] is the name (when present).
-          // Previously this read words[1] for the name when length > 2, which
-          // grabbed the type string instead of the actual variable name.
           const valtype = TYPEMAP[words[1]];
           if (valtype == null) throw new Error(`Unknown local type: ${words[1]}`);
           const name = words.length > 2 ? words[2] : `$${tmp.locals.length}`;
@@ -693,9 +787,6 @@ export function compile(code) {
 
       default: {
         if (tmp) {
-          // FIX #1: was `encodeWasmInstruction((words, tmp, globalNames, imports))`
-          // The extra parentheses made it a comma expression, passing only
-          // `imports` (the last operand) instead of the `words` array.
           tmp.binary.push(...encodeWasmInstruction(words));
         }
         break;
