@@ -557,24 +557,12 @@ function evaluate(lines) {
 
   return output;
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// artificialize
-//
-// FIX 1 – The pass-through guard was `t.startsWith("global")`, which swallowed
-//   `global.get N` and `global.set N` lines (produced by evaluate) before the
-//   name-resolution logic could run.  Changed to `t.startsWith("global ")`.
-//
-// FIX 2 – `global.get name` and `global.set name` lines were never resolved to
-//   numeric indices, so `encodeWasmInstruction` received a string name, coerced
-//   it to NaN, and emitted index 0 for every global regardless of which one was
-//   actually referenced.  artificialize now builds a `globalIndexMap` from the
-//   `global` declarations and replaces names with their indices explicitly.
-// ─────────────────────────────────────────────────────────────────────────────
+
 function artificialize(lines) {
   const globalIndexMap = {};
   let nextGlobalIndex = 0;
 
-  // ---- Pass 1: collect globals ----
+  // ---- 1. Collect globals ----
   for (const line of lines) {
     const t = line.trim();
     if (t.startsWith("global ")) {
@@ -598,7 +586,7 @@ function artificialize(lines) {
 
     // ---- Non-function lines ----
     if (!t.startsWith("export ")) {
-      // still fix global.get/set outside functions
+      // fix global.get/set outside functions
       const globalGetM = t.match(/^global\.get\s+(\w+)$/);
       if (globalGetM) {
         result.push(`global.get ${globalIndexMap[globalGetM[1]] ?? 0}`);
@@ -618,7 +606,7 @@ function artificialize(lines) {
       continue;
     }
 
-    // ---- Start of function block ----
+    // ---- Function block ----
     const funcLines = [];
     funcLines.push(line);
     i++;
@@ -628,9 +616,9 @@ function artificialize(lines) {
       i++;
     }
 
-    // ---- Per-function local indexing ----
+    // ---- 2. Per-function locals ----
     const indexMap = {};
-    let nextIndex = 0;
+    let nextIndex = 0; // reset per function
 
     function assign(name) {
       if (!(name in indexMap)) {
@@ -638,13 +626,12 @@ function artificialize(lines) {
       }
     }
 
-    // ---- 1. Parse parameters correctly ----
+    // ---- 2a. Parse parameters ----
     const header = funcLines[0].trim();
     const tokens = header.slice(7).trim().split(/\s+/);
-
     let j = 1;
 
-    // Only parse if params exist
+    // Only parse if parameters exist
     if (tokens[j] !== '=>') {
       while (j < tokens.length && tokens[j] !== '=>') {
         const type = tokens[j];
@@ -658,35 +645,35 @@ function artificialize(lines) {
       }
     }
 
-    // ---- 2. Locals + assignments ----
+    // ---- 2b. Collect locals from declarations and assignments ----
     for (const l of funcLines) {
       const tt = l.trim();
 
+      // local declaration: local i32 temp
       const localDeclM = tt.match(/^local\s+\S+\s+(\w+)$/);
       if (localDeclM) {
         assign(localDeclM[1]);
         continue;
       }
 
+      // lhs assignment: temp = ...
       const lhsM = tt.match(/(?:\w+\s+)?(\w+)\s*=/);
       if (lhsM) {
         assign(lhsM[1]);
       }
     }
 
-    // ---- 3. Rewrite function lines ----
+    // ---- 2c. Rewrite function lines ----
     for (const l of funcLines) {
       const tt = l.trim();
 
-      if (
-        tt.startsWith("export") ||
-        tt.startsWith("import") ||
-        tt.startsWith("global ")
-      ) {
+      // Skip headers, import, global declaration
+      if (tt.startsWith("export") || tt.startsWith("import") || tt.startsWith("global ")) {
         result.push(l);
         continue;
       }
 
+      // Replace global access
       const globalGetM = tt.match(/^global\.get\s+(\w+)$/);
       if (globalGetM) {
         result.push(`global.get ${globalIndexMap[globalGetM[1]] ?? 0}`);
@@ -699,6 +686,7 @@ function artificialize(lines) {
         continue;
       }
 
+      // Replace locals $name with index
       result.push(
         l.replace(/\$(\w+)/g, (_, name) => {
           assign(name);
