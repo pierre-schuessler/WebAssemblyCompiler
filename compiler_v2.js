@@ -571,68 +571,115 @@ function evaluate(lines) {
 //   `global` declarations and replaces names with their indices explicitly.
 // ─────────────────────────────────────────────────────────────────────────────
 function artificialize(lines) {
-  const indexMap = {};
-  let nextIndex = 0;
-
-  // FIX 2: build a separate index map for globals.
   const globalIndexMap = {};
   let nextGlobalIndex = 0;
+
+  // ---- Pass 1: collect globals ----
   for (const line of lines) {
     const t = line.trim();
-    if (t.startsWith("global ")) {             // FIX 1: trailing space
+    if (t.startsWith("global ")) {
       const tokens = t.split(/\s+/);
       let i = 1;
-      if (tokens[i] === 'mut') i++;            // skip optional 'mut'
-      i++;                                     // skip type
+      if (tokens[i] === 'mut') i++;
+      i++; // skip type
       const name = tokens[i];
-      if (name && !(name in globalIndexMap)) globalIndexMap[name] = nextGlobalIndex++;
-    }
-  }
-
-  function assign(name) {
-    if (!(name in indexMap)) indexMap[name] = nextIndex++;
-  }
-
-  for (const line of lines) {
-    const t = line.trim();
-    if (t.startsWith("export ")) {
-      const tokens = t.slice(7).trim().split(/\s+/);
-      let i = 1;
-      while (i < tokens.length && tokens[i] !== '=>') {
-        if (tokens[i + 1] && tokens[i + 1] !== '=>') assign(tokens[i + 1]);
-        i += 2;
+      if (name && !(name in globalIndexMap)) {
+        globalIndexMap[name] = nextGlobalIndex++;
       }
     }
   }
 
-  for (const line of lines) {
+  const result = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
     const t = line.trim();
-    if (t.startsWith("export") || t.startsWith("global") || t.startsWith("import")) continue;
 
-    const localDeclM = t.match(/^local\s+\S+\s+(\w+)$/);
-    if (localDeclM) { assign(localDeclM[1]); continue; }
+    // ---- If not a function, just copy (with global fixes later) ----
+    if (!t.startsWith("export ")) {
+      result.push(line);
+      i++;
+      continue;
+    }
 
-    const lhsM = t.match(/(?:\w+\s+)?(\w+)\s*=/);
-    if (lhsM) assign(lhsM[1]);
+    // ---- Start of a function block ----
+    const funcLines = [];
+    funcLines.push(line);
+    i++;
+
+    // Collect until next export or end
+    while (i < lines.length && !lines[i].trim().startsWith("export ")) {
+      funcLines.push(lines[i]);
+      i++;
+    }
+
+    // ---- Process this function ----
+    const indexMap = {};
+    let nextIndex = 0;
+
+    function assign(name) {
+      if (!(name in indexMap)) indexMap[name] = nextIndex++;
+    }
+
+    // 1. parameters
+    const header = funcLines[0].trim();
+    const tokens = header.slice(7).trim().split(/\s+/);
+    let j = 1;
+    while (j < tokens.length && tokens[j] !== '=>') {
+      if (tokens[j + 1] && tokens[j + 1] !== '=>') {
+        assign(tokens[j + 1]);
+      }
+      j += 2;
+    }
+
+    // 2. locals + assignments
+    for (const l of funcLines) {
+      const tt = l.trim();
+
+      const localDeclM = tt.match(/^local\s+\S+\s+(\w+)$/);
+      if (localDeclM) {
+        assign(localDeclM[1]);
+        continue;
+      }
+
+      const lhsM = tt.match(/(?:\w+\s+)?(\w+)\s*=/);
+      if (lhsM) {
+        assign(lhsM[1]);
+      }
+    }
+
+    // 3. rewrite lines
+    for (const l of funcLines) {
+      const tt = l.trim();
+
+      if (tt.startsWith("export") || tt.startsWith("import") || tt.startsWith("global ")) {
+        result.push(l);
+        continue;
+      }
+
+      const globalGetM = tt.match(/^global\.get\s+(\w+)$/);
+      if (globalGetM) {
+        result.push(`global.get ${globalIndexMap[globalGetM[1]] ?? 0}`);
+        continue;
+      }
+
+      const globalSetM = tt.match(/^global\.set\s+(\w+)$/);
+      if (globalSetM) {
+        result.push(`global.set ${globalIndexMap[globalSetM[1]] ?? 0}`);
+        continue;
+      }
+
+      result.push(
+        l.replace(/\$(\w+)/g, (_, name) => {
+          assign(name);
+          return String(indexMap[name]);
+        })
+      );
+    }
   }
 
-  return lines.map(line => {
-    const t = line.trim();
-    // FIX 1: "global " not "global" — so global.get/global.set fall through.
-    if (t.startsWith("export") || t.startsWith("global ") || t.startsWith("import")) return line;
-
-    // FIX 2: resolve global.get / global.set names to numeric indices.
-    const globalGetM = t.match(/^global\.get\s+(\w+)$/);
-    if (globalGetM) return `global.get ${globalIndexMap[globalGetM[1]] ?? 0}`;
-
-    const globalSetM = t.match(/^global\.set\s+(\w+)$/);
-    if (globalSetM) return `global.set ${globalIndexMap[globalSetM[1]] ?? 0}`;
-
-    return line.replace(/\$(\w+)/g, (_, name) => {
-      assign(name);
-      return String(indexMap[name]);
-    });
-  });
+  return result;
 }
 
 function preprocess(code) {
