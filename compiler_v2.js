@@ -695,6 +695,8 @@ export function compile(code) {
   }
   flushTmp();
 
+  console.log(types, functions, imports, exports, codes, globals, globalNames, dataSegs, memory)
+
   const importFnCount = imports.length;
 
   // ── Section 1: Type ───────────────────────────────────────────────────────
