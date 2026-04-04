@@ -426,9 +426,12 @@ function preprocess(code) {
     })
     lines = temp;
 
+    console.log(lines)
+
     // determine: create the variable types dictionary to save the data types of all the varialbes
     lines = inferWasmTypes(lines);
 
+    console.log(lines)
     // evaluating: turn something like temp_n add(a, b) into "get a\ngetb\nadd\nset temp_n
 
 
