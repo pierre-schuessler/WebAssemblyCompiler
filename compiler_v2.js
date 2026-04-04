@@ -677,7 +677,7 @@ export function compile(code) {
 
       case "local": {
         if (tmp) {
-          const valtype = TYPEMAP[words[words.length - 1]];
+          const valtype = TYPEMAP[words[1]];
           const name = words.length > 2 ? words[1] : `$${tmp.locals.length}`;
           if (valtype == null) throw new Error(`Unknown local type: ${words[words.length - 1]}`);
           tmp.locals.push([name, valtype]);
