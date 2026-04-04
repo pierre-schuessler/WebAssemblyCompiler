@@ -687,7 +687,7 @@ export function compile(code) {
 
       default: {
         if (tmp) {
-          tmp.binary.push(...encodeWasmInstruction(process(words, tmp, globalNames, imports)));
+          tmp.binary.push(...encodeWasmInstruction((words, tmp, globalNames, imports)));
         }
         break;
       }
