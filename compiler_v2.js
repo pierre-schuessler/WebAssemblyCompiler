@@ -421,7 +421,7 @@ function evaluate(lines) {
       }
       const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
       for (const arg of args) output.push(`get $${arg}`);
-      output.push(`${type} ${operation}`);
+      output.push(`${operation} ${type}`);
       output.push(`set $${dest}`);
       continue;
     }
