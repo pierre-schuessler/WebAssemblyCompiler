@@ -371,47 +371,38 @@ function evaluate(lines) {
   for (const line of lines) {
     const t = line.trim();
 
-    // Skip structural declarations — handled at a higher level
     if (t.startsWith("global") || t.startsWith("export")) {
       output.push(line);
       continue;
     }
 
-    // return var  →  local.get $var  (return itself is emitted by the function wrapper)
     const returnM = t.match(/^return\s+(\w+)$/);
     if (returnM) {
-      output.push(`local.get $${returnM[1]}`);
+      output.push(`get ${returnM[1]}`);
       output.push(`return`);
       continue;
     }
 
     // Shape 1 — typed copy:  f32 temp_0 = [arg2]
-    //   →  local.get $arg2
-    //      local.set $temp_0
     const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*\[(\w+)\]$/);
     if (copyM) {
       const [, _type, dest, src] = copyM;
-      output.push(`local.get $${src}`);
-      output.push(`local.set $${dest}`);
+      output.push(`get ${src}`);
+      output.push(`set ${dest}`);
       continue;
     }
 
     // Shape 2 — typed call:  f32 var = operation f32([a], [b])
-    //   →  local.get $a
-    //      local.get $b
-    //      f32.operation
-    //      local.set $var
     const callM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\w+)\s+(\w+)\s*\((.+)\)$/);
     if (callM) {
       const [, type, dest, operation, _opType, argsStr] = callM;
       const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
-      for (const arg of args) output.push(`local.get $${arg}`);
-      output.push(`${type}.${operation}`);
-      output.push(`local.set $${dest}`);
+      for (const arg of args) output.push(`get ${arg}`);
+      output.push(`${type} ${operation}`);
+      output.push(`set ${dest}`);
       continue;
     }
 
-    // Unrecognised line — pass through
     output.push(line);
   }
 
