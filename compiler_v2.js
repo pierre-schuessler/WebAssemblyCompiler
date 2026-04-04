@@ -396,7 +396,7 @@ function inferWasmTypes(lines) {
 
     // Rebuild:  <type> <var> = <op> <type>(<args>)
     return `${indent}${inferredType} ${varName} = ${operation} ${inferredType}${spacer}(${argsStr})`;
-  }).join('\n');
+  });
 }
 
 function preprocess(code) {
@@ -427,7 +427,7 @@ function preprocess(code) {
     lines = temp;
 
     // determine: create the variable types dictionary to save the data types of all the varialbes
-    lines = inferWasmTypes(lines).split("\n");
+    lines = inferWasmTypes(lines);
 
     // evaluating: turn something like temp_n add(a, b) into "get a\ngetb\nadd\nset temp_n
 
