@@ -367,11 +367,25 @@ function inferWasmTypes(lines) {
 
 function evaluate(lines) {
   const output = [];
+  const knownLocals = new Set();
+  let exportIdx = -1;
 
   for (const line of lines) {
     const t = line.trim();
 
     if (t.startsWith("global") || t.startsWith("export")) {
+      // register params so we don't re-declare them
+      if (t.startsWith("export")) {
+        exportIdx = output.length;
+        const tokens = t.slice(7).trim().split(/\s+/);
+        let i = 1;
+        while (i < tokens.length && tokens[i] !== '=>') {
+          if (tokens[i + 1] && tokens[i + 1] !== '=>' && !["i32","i64","f32","f64"].includes(tokens[i + 1])) {
+            knownLocals.add(tokens[i + 1]);
+            i += 2;
+          } else { i++; }
+        }
+      }
       output.push(line);
       continue;
     }
@@ -386,7 +400,12 @@ function evaluate(lines) {
     // Shape 1 — typed copy:  f32 temp_0 = [arg2]
     const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*\[(\w+)\]$/);
     if (copyM) {
-      const [, _type, dest, src] = copyM;
+      const [, type, dest, src] = copyM;
+      if (!knownLocals.has(dest)) {
+        knownLocals.add(dest);
+        output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
+        exportIdx++;
+      }
       output.push(`get ${src}`);
       output.push(`set ${dest}`);
       continue;
@@ -396,6 +415,11 @@ function evaluate(lines) {
     const callM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\w+)\s+(\w+)\s*\((.+)\)$/);
     if (callM) {
       const [, type, dest, operation, _opType, argsStr] = callM;
+      if (!knownLocals.has(dest)) {
+        knownLocals.add(dest);
+        output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
+        exportIdx++;
+      }
       const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
       for (const arg of args) output.push(`get ${arg}`);
       output.push(`${type} ${operation}`);
