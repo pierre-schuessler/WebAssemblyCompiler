@@ -320,17 +320,114 @@ function flatten(line) {
   return output.join(";\n");
 }
 
+
+/**
+ * Infers WASM types for intermediate variables and annotates assignments.
+ *
+ * Supported type declarations (source of truth):
+ *   global <type> <name>
+ *   export <fn> <type> <arg> <type> <arg> ... => <type>
+ *
+ * Transformed lines:
+ *   var = operation([ref1], [ref2])
+ *   →  <type> var = operation <type>([ref1], [ref2])
+ *
+ * Type inference: the first [bracketed] argument whose type is already
+ * known wins; type then propagates to the newly declared variable.
+ */
+function inferWasmTypes(lines) {
+  const typeMap = {};           // varName → wasmType
+
+  // ── Pass 1: harvest known types from declarations ────────────────────────
+
+  for (const line of lines) {
+    const t = line.trim();
+
+    // global <type> <name>
+    const globalM = t.match(/^global\s+(\S+)\s+(\S+)/);
+    if (globalM) {
+      const [, type, name] = globalM;
+      typeMap[name] = type;
+      continue;
+    }
+
+    // export <funcName>  <type> <arg>  <type> <arg> … => <returnType>
+    if (t.startsWith('export ')) {
+      const tokens = t.slice(7).trim().split(/\s+/);
+      // tokens[0] = funcName, then alternating type/arg pairs until '=>'
+      let i = 1;
+      while (i < tokens.length && tokens[i] !== '=>') {
+        const type    = tokens[i];
+        const argName = tokens[i + 1];
+        if (argName && argName !== '=>') {
+          typeMap[argName] = type;
+        }
+        i += 2;
+      }
+      // capture return type too (useful if you later annotate return statements)
+      if (tokens[i] === '=>' && tokens[i + 1]) {
+        typeMap['__return__'] = tokens[i + 1];
+      }
+    }
+  }
+
+  // ── Pass 2: annotate assignments ─────────────────────────────────────────
+
+  return lines.map(line => {
+    const indent = line.match(/^(\s*)/)[1];
+    const t      = line.trim();
+
+    // <varName> = <operation> <optionalSpace> ( <args> )
+    //   – args may contain [ref] references, raw literals, nested calls, etc.
+    const assignM = t.match(/^(\w+)\s*=\s*(\w+)(\s*)\((.+)\)\s*$/);
+    if (!assignM) return line;
+
+    const [, varName, operation, spacer, argsStr] = assignM;
+
+    // Collect every [bracketedReference] from the argument list
+    const refs = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
+
+    // First ref whose type we already know determines the inferred type
+    const inferredType = refs.map(r => typeMap[r]).find(t => t !== undefined);
+    if (inferredType === undefined) return line;   // can't infer → leave unchanged
+
+    // Propagate so later lines can use this variable's type
+    typeMap[varName] = inferredType;
+
+    // Rebuild:  <type> <var> = <op> <type>(<args>)
+    return `${indent}${inferredType} ${varName} = ${operation} ${inferredType}${spacer}(${argsStr})`;
+  }).join('\n');
+}
+
 function preprocess(code) {
     // cleanup
     let lines = code
         .split("\n")
         .map((l) => l.replace(/;.*$/, "").trim())
         .filter((l) => l.length > 0);
+
+    // types of lines:
+    /*
+    a = b
+    export i32 n => i32
+    global i32 n
+    return
+    */
       
-    
+    let temp = []
     // flattening: turn something like var = add(sub(a, b), c) into "temp_n = sub(a, b)\n var = add(temp_n, c)
+    lines.forEach((line)=>{
+      if (line.startsWith("export") || line.startsWith("global") || line.startsWith("return")){
+        temp.push(line);
+      } // TODO
+      else {
+        temp.push(...flatten(line));
+      }
+    })
+    lines = temp;
 
-
+    // determine: create the variable types dictionary to save the data types of all the varialbes
+    lines = inferWasmTypes(lines).split("\n");
 
     // evaluating: turn something like temp_n add(a, b) into "get a\ngetb\nadd\nset temp_n
 
@@ -338,48 +435,9 @@ function preprocess(code) {
     // artificialize: turn variable names into numbers
 
 
-    const counter = { n: 0 };
-    const declaredLocals = new Set();
-    const declaredGlobals = {};
-    const result = [];
+    
 
-    for (const line of lines) {
-        // Pass through non-assignment lines unchanged
-        if (!line.includes("=") || line.startsWith("export") || line.startsWith("import") ) {
-            result.push(line);
-            continue;
-        }
-        
-        if (line.startsWith("global")){
-
-        }
-
-
-        const eqIdx = line.indexOf("=");
-        const target = line.slice(0, eqIdx).trim();
-        const expression = line.slice(eqIdx + 1).trim();
-
-        const beforeCount = counter.n;
-        const { instructions, tempIndex } = recursive_expand(expression, counter);
-
-        // Declare any new compiler temps that were created
-        for (let i = beforeCount; i < counter.n; i++) {
-            result.push(`local compiler_${i} i32`);
-        }
-
-        // Declare the target variable if we haven't seen it before
-        if (!declaredLocals.has(target)) {
-            result.push(`local ${target} i32`);
-            declaredLocals.add(target);
-        }
-
-        result.push(...instructions);
-        result.push(`get compiler_${tempIndex}`);
-        result.push(`set ${target}`);
-    }
-    console.log(result)
-
-    return result;
+    return lines.join("\n");
 }
 
 
@@ -697,6 +755,18 @@ export function test(funct) {
       result += flatten(input);
       console.log(result); // or return result;
       return result; // return the result if you want
+    case "prepro":{
+      const input = `
+        global i32 name
+
+        export name f32 arg1 f32 arg2 f32 arg3 => f32
+        temp_0 = operation([arg2],[arg2])
+        var = operation([arg1], [temp_0])
+        return var
+        `.trim();
+
+      return preprocess(input);
+    }
     default:
       console.log("No test available for this function.");
       return "No test available for this function.";
