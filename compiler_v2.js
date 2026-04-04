@@ -248,59 +248,62 @@ function recursive_expand(expression, counter = { n: 0 }) {
     return { instructions, tempIndex: t };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// flatten
+//
+// FIX: The original function used [brackets] as argument delimiters and depth
+// markers, so calls written with standard parentheses like add(a, b) produced
+// zero arguments — the arg-collection loop only counted '[' / ']' for depth,
+// meaning every paren-style call silently discarded all its arguments.
+//
+// Rewritten to use '(' / ')' as the delimiters throughout, matching the syntax
+// callers actually write.
+// ─────────────────────────────────────────────────────────────────────────────
 function flatten(line) {
   let output = [];
   let tempIndex = 0;
 
   let lhs = null;
   if (line.includes("=")) {
-    const parts = line.split("=");
-    lhs = parts[0].trim();
-    line = parts[1].trim();
+    const eqIdx = line.indexOf("=");
+    lhs = line.slice(0, eqIdx).trim();
+    line = line.slice(eqIdx + 1).trim();
   }
 
   function _flatten(expr) {
+    expr = expr.trim();
+    const parenIdx = expr.indexOf("(");
+    if (parenIdx === -1) {
+      // Leaf identifier — return bare name; caller wraps it in [brackets].
+      return expr;
+    }
+
+    const funct = expr.slice(0, parenIdx).trim();
+
+    // Find the matching close-paren.
+    let depth = 0, closeIdx = -1;
+    for (let i = parenIdx; i < expr.length; i++) {
+      if (expr[i] === '(') depth++;
+      else if (expr[i] === ')') { depth--; if (depth === 0) { closeIdx = i; break; } }
+    }
+    const inside = expr.slice(parenIdx + 1, closeIdx);
+
+    // Split arguments by comma at depth 0 inside the paren group.
     const args = [];
-    let funct = "";
-    let temp = "";
-    let level = 0;
-    let i = 0;
-
-    while (i < expr.length && expr[i] !== "(") {
-      funct += expr[i];
-      i++;
+    let d = 0, current = "";
+    for (const c of inside) {
+      if (c === '(') { d++; current += c; }
+      else if (c === ')') { d--; current += c; }
+      else if (c === ',' && d === 0) { args.push(current.trim()); current = ""; }
+      else current += c;
     }
-    funct = funct.trim();
-    i++;
-
-    for (; i < expr.length; i++) {
-      const char = expr[i];
-      if (char === "[") {
-        level++;
-        if (level > 1) temp += char;
-      } else if (char === "]") {
-        if (level > 1) temp += char;
-        level--;
-        if (level === 0) {
-          args.push(temp.trim());
-          temp = "";
-        }
-      } else if (char === "," && level === 0) {
-        continue;
-      } else if (char === ")" && level === 0) {
-        break;
-      } else {
-        if (level >= 1) temp += char;
-      }
-    }
+    if (current.trim()) args.push(current.trim());
 
     const tempVars = [];
-    for (let j = 0; j < args.length; j++) {
-      const arg = args[j];
+    for (const arg of args) {
       const tempName = `temp_${tempIndex++}`;
       if (arg.includes("(")) {
-        const innerExpr = _flatten(arg);
-        output.push(`${tempName} = ${innerExpr}`);
+        output.push(`${tempName} = ${_flatten(arg)}`);
       } else {
         output.push(`${tempName} = [${arg}]`);
       }
@@ -323,14 +326,10 @@ function flatten(line) {
 // ─────────────────────────────────────────────────────────────────────────────
 // inferWasmTypes
 //
-// New in this version:
-//   Pass 0  – Builds a funcRegistry from `import` and `export` declarations,
-//              recording each function's call index and return type.
-//   Shape 1 – Handles quoted numeric literals ("5", "3.14") as typed constants.
-//             Integer literals → i32, floating-point literals → f32.
-//   Shape 2 – Detects calls to registered functions and rewrites them as
-//             `type dest = callfn INDEX(args)` so evaluate can emit `call N`.
-//   Shape 3 – Handles standalone void calls: `funcName(args)` with no lhs.
+// FIX: The global-declaration regex did not account for the optional 'mut'
+// keyword, so `global mut i32 counter` captured 'mut' as the type and 'i32'
+// as the name — completely backwards.  The regex now skips 'mut' before
+// matching type and name.
 // ─────────────────────────────────────────────────────────────────────────────
 function inferWasmTypes(lines) {
   const typeMap      = {};
@@ -342,14 +341,13 @@ function inferWasmTypes(lines) {
   for (const line of lines) {
     const t = line.trim();
 
-    // globals: `global [mut] type name [initval]`  (existing convention)
-    const globalM = t.match(/^global\s+(\S+)\s+(\S+)/);
+    // FIX: optional 'mut' before the type token.
+    const globalM = t.match(/^global\s+(?:mut\s+)?(\S+)\s+(\S+)/);
     if (globalM) { typeMap[globalM[2]] = globalM[1]; continue; }
 
-    // imports: `import module.name [localName] [paramTypes] => [retType]`
     if (t.startsWith('import ')) {
       const tokens = t.slice(7).trim().split(/\s+/);
-      let i = 1;                                      // skip tokens[0] = "module.name"
+      let i = 1;
       let localName = null;
       if (tokens[i] && !validTypes.has(tokens[i]) && tokens[i] !== '=>')
         localName = tokens[i++];
@@ -361,7 +359,6 @@ function inferWasmTypes(lines) {
       continue;
     }
 
-    // exports: `export funcName [paramType paramName ...] => [retType]`
     if (t.startsWith('export ')) {
       const tokens   = t.slice(7).trim().split(/\s+/);
       const funcName = tokens[0];
@@ -378,8 +375,6 @@ function inferWasmTypes(lines) {
     }
   }
 
-  // ── Helper: infer the WASM type of a quoted numeric literal ──────────────
-  // Floats contain '.' or an exponent; everything else is treated as i32.
   const constType = raw =>
     (raw.includes('.') || /[eE]/.test(raw)) ? 'f32' : 'i32';
 
@@ -388,8 +383,6 @@ function inferWasmTypes(lines) {
     const indent = line.match(/^(\s*)/)[1];
     const t      = line.trim();
 
-    // Shape 1 ── copy / constant:   varName = [ref]   or   varName = ["lit"]
-    // The [^\]]+ instead of \w+ allows quoted literals like ["3.14"] through.
     const copyM = t.match(/^(\w+)\s*=\s*\[([^\]]+)\]$/);
     if (copyM) {
       const [, varName, ref] = copyM;
@@ -400,14 +393,10 @@ function inferWasmTypes(lines) {
       return `${indent}${inferredType} ${varName} = [${ref}]`;
     }
 
-    // Shape 2 ── assigned call:   varName = operation([a], [b])
     const callM = t.match(/^(\w+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
     if (callM) {
       const [, varName, operation, argsStr] = callM;
 
-      // ── Registered function call (import or sibling export) ──────────────
-      // Rewritten as `type dest = callfn INDEX(args)` so evaluate can emit
-      // `call INDEX` directly.  Void functions use the sentinel type "void".
       if (funcRegistry[operation]) {
         const { index, returnType } = funcRegistry[operation];
         const type = (returnType && validTypes.has(returnType)) ? returnType : 'void';
@@ -415,7 +404,6 @@ function inferWasmTypes(lines) {
         return `${indent}${type} ${varName} = callfn ${index}(${argsStr})`;
       }
 
-      // ── WASM instruction: infer type from argument variables ──────────────
       const refs         = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
       const inferredType = refs.map(r => typeMap[r]).find(tp => tp !== undefined);
       if (!inferredType) return line;
@@ -423,8 +411,6 @@ function inferWasmTypes(lines) {
       return `${indent}${inferredType} ${varName} = ${operation} ${inferredType}(${argsStr})`;
     }
 
-    // Shape 3 ── standalone void call:   funcName([a], [b])   (no lhs)
-    // Produced by flatten when a void function is called as a statement.
     const voidM = t.match(/^([\w.]+)\s*\((.+)\)\s*$/);
     if (voidM && funcRegistry[voidM[1]]) {
       const { index } = funcRegistry[voidM[1]];
@@ -438,22 +424,43 @@ function inferWasmTypes(lines) {
 // ─────────────────────────────────────────────────────────────────────────────
 // evaluate
 //
-// New in this version:
-//   Shape 1 – Detects quoted-literal sources ("5", "3.14") and emits a typed
-//             `const` instruction instead of a `get` for a local variable.
-//   Shape 2 – Distinguishes `callfn INDEX(args)` from ordinary WASM ops and
-//             emits `call INDEX`; skips `set` for void-return calls.
-//   Shape 3 – Handles standalone `callfn INDEX(args)` lines (no dest).
+// FIX 1 – Declaration skip was `t.startsWith("global")`, which also matched
+//   `global.get` and `global.set` instruction lines, causing them to be pushed
+//   verbatim and skipped by every subsequent handler.  Changed to
+//   `t.startsWith("global ")` (note trailing space) so only the declaration
+//   keyword is caught; instruction lines fall through normally.
+//
+// FIX 2 – Globals were being declared as locals and accessed via local.get/set.
+//   evaluate now pre-scans for `global` declarations, and for every reference to
+//   a global name emits `global.get` / `global.set` instead of `get $` / `set $`,
+//   and never inserts a `local` declaration for a global variable.
+//
+// FIX 3 – `return varName` emitted `get $varName` even for globals; it now
+//   emits `global.get varName` when the name is in the global set.
 // ─────────────────────────────────────────────────────────────────────────────
 function evaluate(lines) {
   const output = [];
   const knownLocals = new Set();
+  const globalNames = new Set();   // FIX: track all global variable names
   let exportIdx = -1;
+
+  // Pre-scan: collect global names so we can distinguish them from locals.
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith("global ")) {            // FIX: trailing space, not bare "global"
+      const tokens = t.split(/\s+/);
+      let i = 1;
+      if (tokens[i] === 'mut') i++;           // skip optional 'mut'
+      i++;                                    // skip type
+      if (tokens[i]) globalNames.add(tokens[i]);
+    }
+  }
 
   for (const line of lines) {
     const t = line.trim();
 
-    if (t.startsWith("global") || t.startsWith("export")) {
+    // FIX: "global " (declaration) is a pass-through; "global." (instruction) is not.
+    if (t.startsWith("global ") || t.startsWith("export")) {
       if (t.startsWith("export")) {
         exportIdx = output.length;
         const tokens = t.slice(7).trim().split(/\s+/);
@@ -471,64 +478,81 @@ function evaluate(lines) {
 
     const returnM = t.match(/^return\s+(\w+)$/);
     if (returnM) {
-      output.push(`get $${returnM[1]}`);
+      const name = returnM[1];
+      // FIX 3: use global.get for global names
+      output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
       output.push(`return`);
       continue;
     }
 
-    // Shape 1 ── typed copy or constant:   type dest = [src]   or   type dest = ["lit"]
-    // [^\]]+ allows quoted literals through the regex.
+    // Shape: `type dest = [src]`
     const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*\[([^\]]+)\]$/);
     if (copyM) {
       const [, type, dest, src] = copyM;
-      if (type === 'void') continue;                    // void placeholder — skip entirely
-      if (!knownLocals.has(dest)) {
+      if (type === 'void') continue;
+
+      // FIX 2a: don't declare a local for a global variable
+      if (!globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
         exportIdx++;
       }
+
       const isConst = src.startsWith('"') && src.endsWith('"');
       if (isConst) {
-        // Emit a typed `const` instruction; the literal value is the raw number.
         output.push(`const ${type} ${src.slice(1, -1)}`);
+      } else if (globalNames.has(src)) {
+        // FIX 2b: load from global
+        output.push(`global.get ${src}`);
       } else {
         output.push(`get $${src}`);
       }
-      output.push(`set $${dest}`);
+
+      // FIX 2c: store to global
+      output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       continue;
     }
 
-    // Shape 2 ── typed call:   type dest = operation opType(args)
-    //            or callfn:    type dest = callfn index(args)
-    // Note: for callfn, `_opType` carries the numeric function index, not a type.
+    // Shape: `type dest = operation opType(args)`  or  `type dest = callfn index(args)`
     const callM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\w+)\s+(\w+)\s*\((.+)\)$/);
     if (callM) {
       const [, type, dest, operation, _opType, argsStr] = callM;
-      if (type !== 'void' && !knownLocals.has(dest)) {
+
+      // FIX 2a: don't declare a local for a global variable
+      if (type !== 'void' && !globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
         exportIdx++;
       }
+
       const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
-      for (const arg of args) output.push(`get $${arg}`);
+      // FIX 2b: load each arg from global if needed
+      for (const arg of args) {
+        output.push(globalNames.has(arg) ? `global.get ${arg}` : `get $${arg}`);
+      }
+
       if (operation === 'callfn') {
-        // _opType is the function index; emit `call N` and skip `set` for void.
         output.push(`call ${_opType}`);
-        if (type !== 'void') output.push(`set $${dest}`);
+        if (type !== 'void') {
+          // FIX 2c: store result to global
+          output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
+        }
       } else {
         output.push(`${operation} ${type}`);
-        output.push(`set $${dest}`);
+        // FIX 2c: store result to global
+        output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       }
       continue;
     }
 
-    // Shape 3 ── standalone void call (no dest):   callfn index([a], [b])
-    // Produced by inferWasmTypes Shape 3 for void-return function statements.
+    // Shape: standalone void call `callfn index(args)`
     const voidCallM = t.match(/^callfn\s+(\d+)\((.+)\)$/);
     if (voidCallM) {
       const [, index, argsStr] = voidCallM;
       const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
-      for (const arg of args) output.push(`get $${arg}`);
+      for (const arg of args) {
+        output.push(globalNames.has(arg) ? `global.get ${arg}` : `get $${arg}`);
+      }
       output.push(`call ${index}`);
       continue;
     }
@@ -539,9 +563,37 @@ function evaluate(lines) {
   return output;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// artificialize
+//
+// FIX 1 – The pass-through guard was `t.startsWith("global")`, which swallowed
+//   `global.get N` and `global.set N` lines (produced by evaluate) before the
+//   name-resolution logic could run.  Changed to `t.startsWith("global ")`.
+//
+// FIX 2 – `global.get name` and `global.set name` lines were never resolved to
+//   numeric indices, so `encodeWasmInstruction` received a string name, coerced
+//   it to NaN, and emitted index 0 for every global regardless of which one was
+//   actually referenced.  artificialize now builds a `globalIndexMap` from the
+//   `global` declarations and replaces names with their indices explicitly.
+// ─────────────────────────────────────────────────────────────────────────────
 function artificialize(lines) {
   const indexMap = {};
   let nextIndex = 0;
+
+  // FIX 2: build a separate index map for globals.
+  const globalIndexMap = {};
+  let nextGlobalIndex = 0;
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith("global ")) {             // FIX 1: trailing space
+      const tokens = t.split(/\s+/);
+      let i = 1;
+      if (tokens[i] === 'mut') i++;            // skip optional 'mut'
+      i++;                                     // skip type
+      const name = tokens[i];
+      if (name && !(name in globalIndexMap)) globalIndexMap[name] = nextGlobalIndex++;
+    }
+  }
 
   function assign(name) {
     if (!(name in indexMap)) indexMap[name] = nextIndex++;
@@ -572,7 +624,15 @@ function artificialize(lines) {
 
   return lines.map(line => {
     const t = line.trim();
-    if (t.startsWith("export") || t.startsWith("global") || t.startsWith("import")) return line;
+    // FIX 1: "global " not "global" — so global.get/global.set fall through.
+    if (t.startsWith("export") || t.startsWith("global ") || t.startsWith("import")) return line;
+
+    // FIX 2: resolve global.get / global.set names to numeric indices.
+    const globalGetM = t.match(/^global\.get\s+(\w+)$/);
+    if (globalGetM) return `global.get ${globalIndexMap[globalGetM[1]] ?? 0}`;
+
+    const globalSetM = t.match(/^global\.set\s+(\w+)$/);
+    if (globalSetM) return `global.set ${globalIndexMap[globalSetM[1]] ?? 0}`;
 
     return line.replace(/\$(\w+)/g, (_, name) => {
       assign(name);
@@ -922,7 +982,7 @@ export function compile(code) {
 export function test(funct) {
   switch (funct) {
     case "flatten":
-      const input = "x = add([mul([a],[b])], [mul([c],[d])])";
+      const input = "x = add(mul(a,b), mul(c,d))";
       let result = "Flatten function tester - Input: ";
       result += input;
       result += "\nOutput: \n";
@@ -932,7 +992,7 @@ export function test(funct) {
     case "prepro":{
       const input = `
         export add2 f32 x f32 y => f32
-          var = add([x], [y])
+          var = add(x, y)
           return var
         `.trim();
 
