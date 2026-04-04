@@ -323,7 +323,6 @@ function flatten(line) {
 function inferWasmTypes(lines) {
   const typeMap = {};
 
-  // Pass 1: harvest types from global/export declarations (unchanged)
   for (const line of lines) {
     const t = line.trim();
     const globalM = t.match(/^global\s+(\S+)\s+(\S+)/);
@@ -340,7 +339,6 @@ function inferWasmTypes(lines) {
     }
   }
 
-  // Pass 2: annotate assignments
   return lines.map(line => {
     const indent = line.match(/^(\s*)/)[1];
     const t = line.trim();
@@ -367,61 +365,140 @@ function inferWasmTypes(lines) {
   });
 }
 
-function preprocess(code) {
-    /*
-     const example_code = `
-        global i32 name
+function evaluate(lines) {
+  const output = [];
 
-        export name f32 arg1 f32 arg2 f32 arg3 => f32
-        temp_0 = operation([arg2],[arg2])
-        var = operation([arg1], [temp_0])
-        return var
-        `.trim();
-    */
+  for (const line of lines) {
+    const t = line.trim();
 
-    // cleanup
-    let lines = code
-        .split("\n")
-        .map((l) => l.replace(/;.*$/, "").trim())
-        .filter((l) => l.length > 0);
+    // Skip structural declarations — handled at a higher level
+    if (t.startsWith("global") || t.startsWith("export")) {
+      output.push(line);
+      continue;
+    }
 
-    // types of lines:
-    /*
-    a = b
-    export i32 n => i32
-    global i32 n
-    return
-    */
-      
-    let temp = []
-    // flattening: turn something like var = add(sub(a, b), c) into "temp_n = sub(a, b)\n var = add(temp_n, c)
-    lines.forEach((line)=>{
-      if (line.startsWith("export") || line.startsWith("global") || line.startsWith("return")){
-        temp.push(line);
-      } // TODO
-      else {
-        temp.push(...(flatten(line)));
-      }
-    })
-    lines = temp;
+    // return var  →  local.get $var  (return itself is emitted by the function wrapper)
+    const returnM = t.match(/^return\s+(\w+)$/);
+    if (returnM) {
+      output.push(`local.get $${returnM[1]}`);
+      output.push(`return`);
+      continue;
+    }
 
-    console.log(lines)
+    // Shape 1 — typed copy:  f32 temp_0 = [arg2]
+    //   →  local.get $arg2
+    //      local.set $temp_0
+    const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*\[(\w+)\]$/);
+    if (copyM) {
+      const [, _type, dest, src] = copyM;
+      output.push(`local.get $${src}`);
+      output.push(`local.set $${dest}`);
+      continue;
+    }
 
-    // determine: create the variable types dictionary to save the data types of all the varialbes
-    lines = inferWasmTypes(lines);
+    // Shape 2 — typed call:  f32 var = operation f32([a], [b])
+    //   →  local.get $a
+    //      local.get $b
+    //      f32.operation
+    //      local.set $var
+    const callM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\w+)\s+(\w+)\s*\((.+)\)$/);
+    if (callM) {
+      const [, type, dest, operation, _opType, argsStr] = callM;
+      const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
+      for (const arg of args) output.push(`local.get $${arg}`);
+      output.push(`${type}.${operation}`);
+      output.push(`local.set $${dest}`);
+      continue;
+    }
 
-    console.log(lines)
-    // evaluating: turn something like temp_n add(a, b) into "get a\ngetb\nadd\nset temp_n
+    // Unrecognised line — pass through
+    output.push(line);
+  }
 
-
-    // artificialize: turn variable names into numbers
-
-
-    
-
-    return lines.join("\n");
+  return output;
 }
 
+function artificialize(lines) {
+  // Collect all local variable names in order of first appearance.
+  // Parameters from `export` come first (they occupy the first local indices in WASM),
+  // then every other variable in declaration order.
+  const indexMap = {};
+  let nextIndex = 0;
+
+  function assign(name) {
+    if (!(name in indexMap)) indexMap[name] = nextIndex++;
+  }
+
+  // First pass: register params from export declaration first
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith("export ")) {
+      const tokens = t.slice(7).trim().split(/\s+/);
+      let i = 1;
+      while (i < tokens.length && tokens[i] !== '=>') {
+        if (tokens[i + 1] && tokens[i + 1] !== '=>') assign(tokens[i + 1]);
+        i += 2;
+      }
+    }
+  }
+
+  // Second pass: register everything else in order
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith("export") || t.startsWith("global")) continue;
+    const allVars = [...t.matchAll(/\$?(\b\w+\b)/g)]
+      .map(m => m[1])
+      .filter(n => n in indexMap || /^(temp_\d+|var\b)/.test(n));
+    for (const name of allVars) assign(name);
+    // Also catch lhs of assignments directly
+    const lhsM = t.match(/(?:\w+\s+)?(\w+)\s*=/);
+    if (lhsM) assign(lhsM[1]);
+  }
+
+  // Replace every $name reference and local.get/set targets
+  return lines.map(line => {
+    const t = line.trim();
+    if (t.startsWith("export") || t.startsWith("global")) return line;
+
+    return line.replace(/\$(\w+)/g, (_, name) => {
+      assign(name); // ensure late-seen names still get an index
+      return String(indexMap[name]);
+    });
+  });
+}
+
+function preprocess(code) {
+  let lines = code
+    .split("\n")
+    .map((l) => l.replace(/;.*$/, "").trim())
+    .filter((l) => l.length > 0);
+
+  // Flatten nested calls into temp vars
+  let temp = [];
+  lines.forEach((line) => {
+    if (line.startsWith("export") || line.startsWith("global") || line.startsWith("return")) {
+      temp.push(line);
+    } else {
+      temp.push(...flatten(line));
+    }
+  });
+  lines = temp;
+  console.log("after flatten:", lines);
+
+  // Annotate variables with WASM types
+  lines = inferWasmTypes(lines);
+  console.log("after inferWasmTypes:", lines);
+
+  // Emit stack machine instructions
+  lines = evaluate(lines);
+  console.log("after evaluate:", lines);
+
+  // Replace variable names with numeric indices
+  lines = artificialize(lines);
+  console.log("after artificialize:", lines);
+
+  return lines.join("\n");
+}
 
 export function compile(code) {
 
