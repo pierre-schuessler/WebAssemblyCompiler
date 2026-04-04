@@ -311,6 +311,7 @@ function flatten(line) {
     return `${funct}([${tempVars.join("], [")}])`; // ← wrap each in []
   }
 
+}
 
 function inferWasmTypes(lines) {
   const typeMap = {};           // varName → wasmType
