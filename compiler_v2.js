@@ -477,11 +477,13 @@ function evaluate(lines) {
       continue;
     }
 
+    console.log("Found the following globals and locals: ", globalNames, knownLocals)
+
     if (t.startsWith("global ")) {
       output.push(line);
       continue;
     }
-
+    
     const returnM = t.match(/^return\s+(\w+)$/);
     if (returnM) {
       const name = returnM[1];
