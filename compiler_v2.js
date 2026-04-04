@@ -440,18 +440,18 @@ function inferWasmTypes(lines) {
 // ─────────────────────────────────────────────────────────────────────────────
 function evaluate(lines) {
   const output = [];
-  const knownLocals = new Set();
-  const globalNames = new Set();   // FIX: track all global variable names
+  const globalNames = new Set();   // still global
   let exportIdx = -1;
+  let knownLocals = new Set();     // now reset per function
 
-  // Pre-scan: collect global names so we can distinguish them from locals.
+  // Pre-scan globals
   for (const line of lines) {
     const t = line.trim();
-    if (t.startsWith("global ")) {            // FIX: trailing space, not bare "global"
+    if (t.startsWith("global ")) {
       const tokens = t.split(/\s+/);
       let i = 1;
-      if (tokens[i] === 'mut') i++;           // skip optional 'mut'
-      i++;                                    // skip type
+      if (tokens[i] === 'mut') i++;
+      i++;
       if (tokens[i]) globalNames.add(tokens[i]);
     }
   }
@@ -459,19 +459,25 @@ function evaluate(lines) {
   for (const line of lines) {
     const t = line.trim();
 
-    // FIX: "global " (declaration) is a pass-through; "global." (instruction) is not.
-    if (t.startsWith("global ") || t.startsWith("export")) {
-      if (t.startsWith("export")) {
-        exportIdx = output.length;
-        const tokens = t.slice(7).trim().split(/\s+/);
-        let i = 1;
-        while (i < tokens.length && tokens[i] !== '=>') {
-          if (tokens[i + 1] && tokens[i + 1] !== '=>' && !["i32","i64","f32","f64"].includes(tokens[i + 1])) {
-            knownLocals.add(tokens[i + 1]);
-            i += 2;
-          } else { i++; }
-        }
+    if (t.startsWith("export")) {
+      // 🔥 RESET per function
+      knownLocals = new Set();
+      exportIdx = output.length;
+
+      const tokens = t.slice(7).trim().split(/\s+/);
+      let i = 1;
+      while (i < tokens.length && tokens[i] !== '=>') {
+        if (tokens[i + 1] && tokens[i + 1] !== '=>' && !["i32","i64","f32","f64"].includes(tokens[i + 1])) {
+          knownLocals.add(tokens[i + 1]);
+          i += 2;
+        } else { i++; }
       }
+
+      output.push(line);
+      continue;
+    }
+
+    if (t.startsWith("global ")) {
       output.push(line);
       continue;
     }
@@ -479,19 +485,16 @@ function evaluate(lines) {
     const returnM = t.match(/^return\s+(\w+)$/);
     if (returnM) {
       const name = returnM[1];
-      // FIX 3: use global.get for global names
       output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
       output.push(`return`);
       continue;
     }
 
-    // Shape: `type dest = [src]`
     const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*\[([^\]]+)\]$/);
     if (copyM) {
       const [, type, dest, src] = copyM;
       if (type === 'void') continue;
 
-      // FIX 2a: don't declare a local for a global variable
       if (!globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
@@ -502,23 +505,19 @@ function evaluate(lines) {
       if (isConst) {
         output.push(`const ${type} ${src.slice(1, -1)}`);
       } else if (globalNames.has(src)) {
-        // FIX 2b: load from global
         output.push(`global.get ${src}`);
       } else {
         output.push(`get $${src}`);
       }
 
-      // FIX 2c: store to global
       output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       continue;
     }
 
-    // Shape: `type dest = operation opType(args)`  or  `type dest = callfn index(args)`
     const callM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\w+)\s+(\w+)\s*\((.+)\)$/);
     if (callM) {
       const [, type, dest, operation, _opType, argsStr] = callM;
 
-      // FIX 2a: don't declare a local for a global variable
       if (type !== 'void' && !globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
@@ -526,7 +525,6 @@ function evaluate(lines) {
       }
 
       const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
-      // FIX 2b: load each arg from global if needed
       for (const arg of args) {
         output.push(globalNames.has(arg) ? `global.get ${arg}` : `get $${arg}`);
       }
@@ -534,18 +532,15 @@ function evaluate(lines) {
       if (operation === 'callfn') {
         output.push(`call ${_opType}`);
         if (type !== 'void') {
-          // FIX 2c: store result to global
           output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
         }
       } else {
         output.push(`${operation} ${type}`);
-        // FIX 2c: store result to global
         output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       }
       continue;
     }
 
-    // Shape: standalone void call `callfn index(args)`
     const voidCallM = t.match(/^callfn\s+(\d+)\((.+)\)$/);
     if (voidCallM) {
       const [, index, argsStr] = voidCallM;
@@ -562,7 +557,6 @@ function evaluate(lines) {
 
   return output;
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // artificialize
 //
