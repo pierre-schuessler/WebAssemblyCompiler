@@ -487,7 +487,10 @@ async function runCommand(raw) {
     try {
       const r = func(...args);
       print(
-        `<span class="c-muted">${esc(fn)}(${args.join(", ")}) → </span><span class="c-ok">${r}</span>`,
+        `<span class="c-muted">Running function ${esc(fn)}(${args.join(", ")})</span>`,
+      );
+      print(
+        `<span class="c-muted">Function ${esc(fn)}(${args.join(", ")}) returned value </span><span class="c-ok">${r}</span>`,
       );
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
