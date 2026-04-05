@@ -12,61 +12,114 @@
     <div class="workspace">
       <div class="editor-row">
         <div class="activity-bar">
-          <div class="activity-btn" id="activityEnv" title="Env Imports">⚙</div>
-          <div class="activity-btn" id="activityDocs" title="Documentation">📄</div>
+          <div
+            class="activity-btn"
+            id="activityEnv"
+            title="Env Imports"
+          >
+            ⚙
+          </div>
+          <div
+            class="activity-btn"
+            id="activityDocs"
+            title="Documentation"
+          >
+            📄
+          </div>
         </div>
 
+        <!-- env panel + resize handle -->
         <div class="side-panel collapsed" id="sidePanel" style="width: 260px">
           <div class="side-panel-header">
             <span class="side-panel-title">Env Imports</span>
-            <span class="side-panel-add" title="Add import">+</span>
+            <span class="side-panel-add" title="Add import" id="envAddBtn">+</span>
           </div>
           <div class="env-list" id="envList"></div>
-
           <div class="env-form hidden" id="envForm">
             <div class="env-form-title" id="envFormTitle">New Import</div>
-
             <div class="env-field">
               <span class="env-label">Name</span>
-              <input class="env-input" id="envName" placeholder="e.g. pow" />
+              <input
+                class="env-input"
+                id="envName"
+                placeholder="e.g. pow"
+                spellcheck="false"
+              />
             </div>
-
             <div class="env-field">
-              <span class="env-label">Signature</span>
-              <input class="env-input" id="envSig" placeholder="i32 i32 => i32" />
+              <span class="env-label"
+                >Signature &nbsp;<span
+                  style="
+                    font-size: 9px;
+                    text-transform: none;
+                    letter-spacing: 0;
+                  "
+                  >(inputs =&gt; outputs)</span
+                ></span
+              >
+              <input
+                class="env-input"
+                id="envSig"
+                placeholder="i32 i32 => i32"
+                spellcheck="false"
+              />
             </div>
-
             <div class="env-field">
-              <span class="env-label">JS Body</span>
-              <textarea class="env-textarea" id="envBody"></textarea>
+              <span class="env-label"
+                >JS Body &nbsp;<span
+                  style="
+                    font-size: 9px;
+                    text-transform: none;
+                    letter-spacing: 0;
+                  "
+                  >(args: a, b, c…)</span
+                ></span
+              >
+              <textarea
+                class="env-textarea"
+                id="envBody"
+                placeholder="return a ** b;"
+              ></textarea>
             </div>
-
+            <div class="env-form-hint">
+              Args are named a, b, c, … based on input count.
+            </div>
             <div class="env-form-btns">
-              <button class="env-btn env-btn-cancel">Cancel</button>
-              <button class="env-btn env-btn-primary">Save</button>
+              <button class="env-btn env-btn-cancel" id="envCancelBtn">
+                Cancel
+              </button>
+              <button class="env-btn env-btn-primary" id="envSaveBtn">
+                Save
+              </button>
             </div>
           </div>
         </div>
+        <div class="resize-handle" id="resizeEnv" title="Drag to resize"></div>
 
-        <div class="resize-handle" id="resizeEnv"></div>
-
+        <!-- docs panel + resize handle -->
         <div class="docs-panel collapsed" id="docsPanel" style="width: 280px">
           <div class="docs-header">
             <span class="docs-back-btn" id="docsBack">‹</span>
-            <span class="docs-header-title" id="docsHeaderTitle">Documentation</span>
+            <span class="docs-header-title" id="docsHeaderTitle"
+              >Documentation</span
+            >
           </div>
           <div class="docs-file-list" id="docsFileList"></div>
           <div class="docs-viewer md" id="docsViewer"></div>
         </div>
+        <div class="resize-handle" id="resizeDocs" title="Drag to resize"></div>
 
-        <div class="resize-handle" id="resizeDocs"></div>
-
-        <div class="line-numbers" id="lineNumbers"></div>
-
-        <div class="editor-wrap" id="editorWrap">
-          <textarea id="code"></textarea>
+        <div class="line-numbers" id="lineNumbers">
+          <span class="line-number active">1</span>
         </div>
-
+        <div class="editor-wrap" id="editorWrap">
+          <textarea
+            id="code"
+            spellcheck="false"
+            autocorrect="off"
+            autocapitalize="off"
+          ></textarea>
+        </div>
         <div class="minimap" id="minimapContainer">
           <canvas id="minimapCanvas"></canvas>
           <div class="minimap-viewport" id="minimapViewport"></div>
@@ -74,11 +127,23 @@
       </div>
 
       <div class="panel" id="panel">
+        <div class="panel-header">
+          <span class="panel-title">Terminal</span>
+        </div>
         <div class="terminal-output" id="termOutput"></div>
-        <input type="text" id="termInput" />
+        <div class="terminal-input-row">
+          <span class="term-prompt-label">wasm&nbsp;$&nbsp;</span>
+          <input
+            type="text"
+            id="termInput"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="make, build, run, hex, clear, help…"
+          />
+        </div>
       </div>
     </div>
-
-    <script type="module" src="script.js"></script>
+    
+    <script src="script.js" type="module"></script>
   </body>
 </html>
