@@ -50,7 +50,7 @@ const DOC_FILES = ["language.md", "examples.md"];
 const docsCache = {};
 let currentDoc = null;
 
-function toggleDocsPanel() {
+window.toggleDocsPanel = () => {
   const panel = document.getElementById("docsPanel");
   const btn = document.getElementById("activityDocs");
   const open = panel.classList.toggle("collapsed") === false;
@@ -214,7 +214,7 @@ let envImports = [
 ];
 let editingIdx = null;
 
-function toggleEnvPanel() {
+window.toggleEnvPanel = () => {
   const panel = document.getElementById("sidePanel");
   const btn = document.getElementById("activityEnv");
   const collapsed = panel.classList.toggle("collapsed");
