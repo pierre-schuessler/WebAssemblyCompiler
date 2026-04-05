@@ -417,12 +417,13 @@ function evaluate(lines) {
       continue;
     }
 
-    const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
+    // Handles direct copies/assignments: e.g., `i32 a = "1"` or `a = "1"`
+    const copyM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
     if (copyM) {
-      const [, type, dest, rawVal] = copyM;
-      if (type === 'void') continue;
-
-      if (!globalNames.has(dest) && !knownLocals.has(dest)) {
+      const [, maybeType, dest, rawVal] = copyM;
+      const type = maybeType || 'void';
+      
+      if (type !== 'void' && !globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
         exportIdx++;
@@ -431,7 +432,8 @@ function evaluate(lines) {
       const isConst = rawVal.startsWith('"');
       if (isConst) {
         const src = rawVal.slice(1, -1);
-        output.push(`const ${type} ${src}`);
+        const constType = (type !== 'void') ? type : ((src.includes('.') || /[eE]/.test(src)) ? 'f32' : 'i32');
+        output.push(`const ${constType} ${src}`);
       } else {
         const src = rawVal.slice(1);
         output.push(globalNames.has(src) ? `global.get ${src}` : `get $${src}`);
@@ -441,9 +443,12 @@ function evaluate(lines) {
       continue;
     }
 
-    const callM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\w+)\s+(\w+)\s*\((.+)\)$/);
+    // Handles function/instruction calls: e.g., `i32 a = i32.add($b, "1")` or `a = load_u8("1")`
+    const callM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*([^(]+)\((.*)\)$/);
     if (callM) {
-      const [, type, dest, operation, opType, argsStr] = callM;
+      const [, maybeType, dest, rawOp, argsStr] = callM;
+      const type = maybeType || 'void';
+      const opStr = rawOp.trim();
 
       if (type !== 'void' && !globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
@@ -451,48 +456,70 @@ function evaluate(lines) {
         exportIdx++;
       }
 
-      // FIX: emit constants using the operation's inferred type (opType) rather
-      // than re-deriving it from the literal value alone. This ensures that
-      // "10" alongside an i64 operation produces `const i64 10`, not `const i32 10`.
-      for (const arg of argsStr.split(',').map(a => a.trim())) {
+      // Filter out empty arguments safely
+      const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
+      
+      for (const arg of args) {
         if (arg.startsWith('"')) {
           const val = arg.slice(1, -1);
-          output.push(`const ${opType} ${val}`);
+          let constType = (type !== 'void') ? type : 'i32'; // Fallback
+          
+          // Guess type from the unified operation string or the literal itself
+          if (opStr.includes('i64')) constType = 'i64';
+          else if (opStr.includes('f32')) constType = 'f32';
+          else if (opStr.includes('f64')) constType = 'f64';
+          else if (opStr.includes('i32')) constType = 'i32';
+          else if (val.includes('.') || /[eE]/.test(val)) constType = 'f32';
+
+          output.push(`const ${constType} ${val}`);
         } else {
           const name = arg.slice(1); // strip $
           output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
         }
       }
 
-      if (operation === 'callfn') {
-        output.push(`call ${opType}`);
-        if (type !== 'void') {
-          output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
-        }
+      if (opStr.startsWith('callfn ')) {
+        const idx = opStr.slice(7).trim();
+        output.push(`call ${idx}`);
       } else {
-        output.push(`${operation} ${type}`);
-        output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
+        output.push(opStr); // Pushes the raw instruction string cleanly
       }
+      
+      output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       continue;
     }
 
-    const voidCallM = t.match(/^callfn\s+(\d+)\((.+)\)$/);
+    // Handles void calls: e.g., `callfn 0($a)` or `drop()`
+    const voidCallM = t.match(/^([^(]+)\((.*)\)$/);
     if (voidCallM) {
-      const [, index, argsStr] = voidCallM;
-      for (const arg of argsStr.split(',').map(a => a.trim())) {
+      const [, rawOp, argsStr] = voidCallM;
+      const opStr = rawOp.trim();
+      
+      const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
+      
+      for (const arg of args) {
         if (arg.startsWith('"')) {
           const val = arg.slice(1, -1);
-          // FIX: for void calls we have no opType from inferWasmTypes, so fall
-          // back to deriving the type from the literal (same behaviour as before,
-          // but isolated to the one place it is actually unavoidable).
-          const t2 = (val.includes('.') || /[eE]/.test(val)) ? 'f32' : 'i32';
-          output.push(`const ${t2} ${val}`);
+          let constType = 'i32';
+          
+          if (opStr.includes('i64')) constType = 'i64';
+          else if (opStr.includes('f32')) constType = 'f32';
+          else if (opStr.includes('f64')) constType = 'f64';
+          else if (val.includes('.') || /[eE]/.test(val)) constType = 'f32';
+
+          output.push(`const ${constType} ${val}`);
         } else {
           const name = arg.slice(1); // strip $
           output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
         }
       }
-      output.push(`call ${index}`);
+
+      if (opStr.startsWith('callfn ')) {
+        const idx = opStr.slice(7).trim();
+        output.push(`call ${idx}`);
+      } else {
+        output.push(opStr);
+      }
       continue;
     }
 
