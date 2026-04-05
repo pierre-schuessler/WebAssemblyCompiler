@@ -421,21 +421,25 @@ function evaluate(lines) {
     const copyM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
     if (copyM) {
       const [, maybeType, dest, rawVal] = copyM;
-      const type = maybeType || 'void';
       
-      if (type !== 'void' && !globalNames.has(dest) && !knownLocals.has(dest)) {
+      const isConst = rawVal.startsWith('"');
+      const src = isConst ? rawVal.slice(1, -1) : rawVal.slice(1);
+      
+      // If no type is provided, infer it from the constant or default to i32
+      let type = maybeType;
+      if (!type) {
+        type = isConst && (src.includes('.') || /[eE]/.test(src)) ? 'f32' : 'i32';
+      }
+      
+      if (!globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
         exportIdx++;
       }
 
-      const isConst = rawVal.startsWith('"');
       if (isConst) {
-        const src = rawVal.slice(1, -1);
-        const constType = (type !== 'void') ? type : ((src.includes('.') || /[eE]/.test(src)) ? 'f32' : 'i32');
-        output.push(`const ${constType} ${src}`);
+        output.push(`const ${type} ${src}`);
       } else {
-        const src = rawVal.slice(1);
         output.push(globalNames.has(src) ? `global.get ${src}` : `get $${src}`);
       }
 
@@ -447,10 +451,18 @@ function evaluate(lines) {
     const callM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*([^(]+)\((.*)\)$/);
     if (callM) {
       const [, maybeType, dest, rawOp, argsStr] = callM;
-      const type = maybeType || 'void';
       const opStr = rawOp.trim();
 
-      if (type !== 'void' && !globalNames.has(dest) && !knownLocals.has(dest)) {
+      // If no type is provided on the LHS, infer it from the operation string, default to i32
+      let type = maybeType;
+      if (!type) {
+        if (opStr.includes('i64')) type = 'i64';
+        else if (opStr.includes('f32')) type = 'f32';
+        else if (opStr.includes('f64')) type = 'f64';
+        else type = 'i32'; // Fallback for things like load_u8
+      }
+
+      if (!globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
         exportIdx++;
@@ -462,9 +474,9 @@ function evaluate(lines) {
       for (const arg of args) {
         if (arg.startsWith('"')) {
           const val = arg.slice(1, -1);
-          let constType = (type !== 'void') ? type : 'i32'; // Fallback
+          let constType = type; 
           
-          // Guess type from the unified operation string or the literal itself
+          // Refine constant type based on instruction string if needed
           if (opStr.includes('i64')) constType = 'i64';
           else if (opStr.includes('f32')) constType = 'f32';
           else if (opStr.includes('f64')) constType = 'f64';
