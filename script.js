@@ -457,6 +457,7 @@ async function runCommand(raw, isInternal = false) {
       const exps = Object.keys(lastInstance.exports);
       print(`<span class="c-muted">exports: </span><span class="c-ok">${exps.map(esc).join(", ")}</span>`);
       
+      
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
     }
@@ -465,6 +466,7 @@ async function runCommand(raw, isInternal = false) {
   else if (verb === "make") {
     // 1. Recursively call build
     await runCommand("build", true);
+    print("");
     
     // 2. If build failed or there's no instance, bail out
     if (!lastInstance) return;
