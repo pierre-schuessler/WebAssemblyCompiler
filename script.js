@@ -395,113 +395,132 @@ print(
 );
 print("");
 
-async function runCommand(raw) {
+async function runCommand(raw, isInternal = false) {
   const cmd = raw.trim();
   if (!cmd) return;
-  cmdHistory.unshift(cmd);
-  histIdx = -1;
-  print(`<span class="c-prompt">wasm $ </span>${esc(cmd)}`);
+
+  // Only update history and print the prompt if it's a real user command
+  if (!isInternal) {
+    cmdHistory.unshift(cmd);
+    histIdx = -1;
+    print(`<span class="c-prompt">wasm $ </span>${esc(cmd)}`);
+  }
+
   const parts = cmd.split(/\s+/),
     verb = parts[0].toLowerCase();
+
   if (verb === "help") {
-    print(
-      `<span class="c-muted">  make [args]   — compile &amp; test exports with given args (padded with 0s)</span>`,
-    );
+    print(`<span class="c-muted">  make [args]   — compile &amp; test exports with given args (padded with 0s)</span>`);
     print(`<span class="c-muted">  build         — compile only</span>`);
-    print(
-      `<span class="c-muted">  run fn [args] — call exported function</span>`,
-    );
-    print(
-      `<span class="c-muted">  hex           — full hex dump of binary</span>`,
-    );
+    print(`<span class="c-muted">  run fn [args] — call exported function</span>`);
+    print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
     print(`<span class="c-muted">  clear         — clear terminal</span>`);
-  } else if (verb === "clear") {
+  } 
+  
+  else if (verb === "clear") {
     termOutput.innerHTML = "";
-  } else if (verb === "build" || verb === "make") {
+  } 
+  
+  else if (verb === "build") {
     const code = document.getElementById("code").value;
     if (!code.trim()) {
       print(`<span class="c-err">editor is empty</span>`);
+      return;
     }
+    
     print(`<span class="c-muted">compiling…</span>`);
+    
     try {
       const binary = compile(code);
       if (!binary) throw new Error("compile() returned null");
+      
       lastBinary = binary;
       lastMeta = binary.meta || {};
+      
       print(`<span class="c-ok">✓ ${binary.length} bytes</span>`);
+      
       let hex = "";
       const lim = Math.min(binary.length, 48);
-      for (let i = 0; i < lim; i++)
+      for (let i = 0; i < lim; i++) {
         hex += binary[i].toString(16).padStart(2, "0").toUpperCase() + " ";
-      if (binary.length > 48)
+      }
+      if (binary.length > 48) {
         hex += `<span class="c-muted">… +${binary.length - 48}</span>`;
+      }
       print(`<span class="c-hex">${hex}</span>`);
+      
       const mod = await WebAssembly.compile(binary);
       lastInstance = await WebAssembly.instantiate(mod, {
         env: buildEnvObject(),
       });
+      
       const exps = Object.keys(lastInstance.exports);
-      print(
-        `<span class="c-muted">exports: </span><span class="c-ok">${exps.map(esc).join(", ")}</span>`,
-      );
-      if (verb === "make") {
-        const supplied = parts.slice(1).map(Number);
-        for (const fn of exps) {
-          if (typeof lastInstance.exports[fn] !== "function") continue;
-          const needed = lastMeta[fn] ?? supplied.length;
-          const testArgs = Array.from({ length: needed }, (_, i) =>
-            i < supplied.length ? supplied[i] : 0,
-          );
-          const argLabel = testArgs.join(", ");
-          try {
-            print(
-              `<span class="c-muted">Running function ${esc(fn)}(${testArgs.join(", ")})</span>`,
-            );
-            const r = lastInstance.exports[fn](...testArgs);
-            print(
-              `<span class="c-muted">  ${esc(fn)}(${argLabel}) → </span><span class="c-ok">${r}</span>`,
-            );
-          } catch (e) {
-            print(
-              `<span class="c-muted">  ${esc(fn)}(${argLabel}) → </span><span class="c-err">${esc(e.message)}</span>`,
-            );
-          }
-        }
-      }
+      print(`<span class="c-muted">exports: </span><span class="c-ok">${exps.map(esc).join(", ")}</span>`);
+      
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
     }
-  } else if (verb === "run") {
+  } 
+  
+  else if (verb === "make") {
+    // 1. Recursively call build
+    await runCommand("build", true);
+    
+    // 2. If build failed or there's no instance, bail out
+    if (!lastInstance) return;
+
+    // 3. Loop through exports and recursively call run
+    const supplied = parts.slice(1).map(Number);
+    const exps = Object.keys(lastInstance.exports);
+    
+    for (const fn of exps) {
+      if (typeof lastInstance.exports[fn] !== "function") continue;
+      
+      const needed = lastMeta[fn] ?? supplied.length;
+      const testArgs = Array.from({ length: needed }, (_, i) =>
+        i < supplied.length ? supplied[i] : 0,
+      );
+      
+      // Pass execution logic entirely to "run"
+      await runCommand(`run ${fn} ${testArgs.join(" ")}`, true);
+    }
+  } 
+  
+  else if (verb === "run") {
     if (!lastInstance) {
-      print(`<span class="c-warn">⚠ run make first</span>`);
+      print(`<span class="c-warn">⚠ run build/make first</span>`);
       return;
     }
+    
     const fn = parts[1],
       args = parts.slice(2).map(Number);
+      
     if (!fn) {
       print(`<span class="c-err">usage: run &lt;fn&gt; [args]</span>`);
       return;
     }
+    
     const func = lastInstance.exports[fn];
     if (!func || typeof func !== "function") {
       print(`<span class="c-err">✗ no export "${esc(fn)}"</span>`);
       return;
     }
+    
     try {
-      print(
-        `<span class="c-muted">Running function ${esc(fn)}(${args.join(", ")})</span>`,
-      );
+      print(`<span class="c-muted">Running function ${esc(fn)}(${args.join(", ")})</span>`);
       const r = func(...args);
-      print(
-        `<span class="c-muted">${esc(fn)}(${args.join(", ")}) → </span><span class="c-ok">${r}</span>`,
-      );
+      print(`<span class="c-muted">  ${esc(fn)}(${args.join(", ")}) → </span><span class="c-ok">${r}</span>`);
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
     }
-  } else if (verb === "test") {
+  } 
+  
+  else if (verb === "test") {
     let args = parts.slice(1);
     print(test(...args));
-  } else if (verb === "hex") {
+  } 
+  
+  else if (verb === "hex") {
     if (!lastBinary) {
       print(`<span class="c-warn">⚠ run build first</span>`);
       return;
@@ -515,10 +534,14 @@ async function runCommand(raw) {
       }
     }
     if (row) print(`<span class="c-hex">${row}</span>`);
-  } else {
+  } 
+  
+  else {
     print(`<span class="c-err">✗ unknown command: ${esc(verb)}</span>`);
   }
-  print("");
+
+  // Only print the trailing empty line for actual user inputs
+  if (!isInternal) print("");
 }
 
 termInput.addEventListener("keydown", (e) => {
