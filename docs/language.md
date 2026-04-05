@@ -13,8 +13,8 @@ memory <min>[-<max>]
 Declares a linear memory. Sizes are in **pages** (1 page = 64 KB). At most one `memory` directive is allowed per module.
 
 ```
-memory 1        ; 1 page, no maximum
-memory 1-16     ; 1 page minimum, 16 page maximum
+memory 1        // 1 page, no maximum
+memory 1-16     // 1 page minimum, 16 page maximum
 ```
 
 ---
@@ -28,9 +28,9 @@ import <module>.<name> <localAlias> [<paramType> ...] => [<returnType>]
 Declares an external function the module can call. `<module>.<name>` is the import path (e.g. `env.log`). `<localAlias>` is the name used to call it inside function bodies. Parameter types and return type follow the same convention as `export`. Imports with no return value omit the `=>` clause entirely.
 
 ```
-import env.log   log   i32       => i32   ; one i32 param, returns i32
-import env.print print i32               ; one i32 param, no return
-import env.pow   pow   i32 i32   => i32  ; two i32 params, returns i32
+import env.log   log   i32       => i32   // one i32 param, returns i32
+import env.print print i32               // one i32 param, no return
+import env.pow   pow   i32 i32   => i32  // two i32 params, returns i32
 ```
 
 Imports are indexed starting at 0 in the order they appear. They must all appear before any `export`.
@@ -46,9 +46,9 @@ global [mut] <type> <name> [<initValue>]
 Declares a module-level global variable. `mut` makes it writable. The initial value defaults to `0` if omitted.
 
 ```
-global     i32 MAX_SIZE 100   ; immutable i32, initial value 100
-global mut i32 counter   0    ; mutable i32, initial value 0
-global mut f32 ratio     0    ; mutable f32, initial value 0
+global     i32 MAX_SIZE 100   // immutable i32, initial value 100
+global mut i32 counter   0    // mutable i32, initial value 0
+global mut f32 ratio     0    // mutable f32, initial value 0
 ```
 
 Global names are visible across all functions in the file. Reading or writing a global inside a function body uses the same assignment syntax as local variables — the compiler distinguishes them automatically.
@@ -64,9 +64,9 @@ export <funcName> [<type> <paramName> ...] => [<returnType>]
 Opens a new exported function. All body lines that follow (until the next `export` or end of file) belong to this function. Functions with no parameters or no return value simply omit those parts.
 
 ```
-export add   i32 a  i32 b  => i32   ; (i32, i32) → i32
-export negate i32 x        => i32   ; (i32)       → i32
-export init                         ; ()          → void
+export add   i32 a  i32 b  => i32   // (i32, i32) → i32
+export negate i32 x        => i32   // (i32)       → i32
+export init                         // ()          → void
 ```
 
 Exported functions are indexed starting after all imports, in the order they appear.
@@ -84,7 +84,7 @@ Writes bytes into linear memory at compile time. Requires a `memory` declaration
 
 ```
 data 0 "Hello, world!\0"
-data 64 72 101 108 108 111   ; H e l l o
+data 64 72 101 108 108 111   // H e l l o
 ```
 
 ---
@@ -107,9 +107,9 @@ Parameters declared in the `export` header and globals declared at the top level
 
 ```
 export hyp i32 a i32 b => i32
-  aa = mul(a, a)         ; aa : i32  (inferred from a)
-  bb = mul(b, b)         ; bb : i32  (inferred from b)
-  sum = add(aa, bb)      ; sum : i32
+  aa = mul(a, a)         // aa : i32  (inferred from a)
+  bb = mul(b, b)         // bb : i32  (inferred from b)
+  sum = add(aa, bb)      // sum : i32
   return sum
 ```
 
@@ -120,10 +120,10 @@ export hyp i32 a i32 b => i32
 Numeric constants must be written as **quoted strings** in expression arguments. A constant is treated as `i32` if it contains no decimal point or exponent, and as `f32` otherwise.
 
 ```
-n = add(x, "10")         ; x + 10  (i32)
-r = mul(x, "0.5")        ; x * 0.5 (f32)
-k = "42"                 ; constant 42 assigned to k (i32)
-pi = "3.14159"           ; constant pi assigned (f32)
+n = add(x, "10")         // x + 10  (i32)
+r = mul(x, "0.5")        // x * 0.5 (f32)
+k = "42"                 // constant 42 assigned to k (i32)
+pi = "3.14159"           // constant pi assigned (f32)
 ```
 
 ---
@@ -134,10 +134,10 @@ Nested calls are flattened automatically into temp variables. You can write them
 
 ```
 result = add(mul(a, b), mul(c, d))
-; equivalent to:
-;   _t0 = mul(a, b)
-;   _t1 = mul(c, d)
-;   result = add(_t0, _t1)
+// equivalent to:
+//   _t0 = mul(a, b)
+//   _t1 = mul(c, d)
+//   result = add(_t0, _t1)
 ```
 
 ---
@@ -150,8 +150,8 @@ Globals are read and written with the same assignment syntax as locals. The comp
 global mut i32 counter 0
 
 export increment => i32
-  n = add(counter, "1")  ; reads global counter
-  counter = n             ; writes global counter
+  n = add(counter, "1")  // reads global counter
+  counter = n             // writes global counter
   return n
 ```
 
@@ -165,13 +165,13 @@ Call an imported function by its local alias. If the import returns a value, ass
 import env.log log i32 => i32
 
 export demo i32 x => i32
-  r = log(x)             ; call log, store return value
+  r = log(x)             // call log, store return value
   return r
 
 import env.print print i32
 
 export demo2 i32 x
-  print(x)               ; void call — no assignment
+  print(x)               // void call — no assignment
 ```
 
 ---
