@@ -403,7 +403,7 @@ async function runCommand(raw, isInternal = false) {
   if (!isInternal) {
     cmdHistory.unshift(cmd);
     histIdx = -1;
-    print(`<span class="c-prompt"> $ </span>${esc(cmd)}`);
+    print(`<span class="c-prompt">$ </span>${esc(cmd)}`);
   }
 
   const parts = cmd.split(/\s+/),
