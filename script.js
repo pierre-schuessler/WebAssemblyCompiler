@@ -129,7 +129,10 @@ function renderMarkdown(md) {
   const codeBlocks = [];
   md = md.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, code) => {
     const placeholder = `@@CODE_BLOCK_${codeBlocks.length}@@`;
-    codeBlocks.push(code);
+    // Escape HTML inside the code block now, before the global escape pass
+    codeBlocks.push(
+      code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    );
     return placeholder;
   });
 
@@ -193,6 +196,7 @@ function renderMarkdown(md) {
       const t = chunk.trim();
       if (!t) return "";
       if (/^<(h[1-3]|ul|ol|pre|table|blockquote|hr|code)/i.test(t)) return t;
+      if (/^@@CODE_BLOCK_\d+@@$/.test(t)) return t;
       return `<p>${t.replace(/\n/g, " ")}</p>`;
     })
     .join("\n");
