@@ -173,7 +173,6 @@ function encodeWasmInstruction(words) {
 }
 
 const TYPEMAP = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
-
 // ─────────────────────────────────────────────────────────────────────────────
 // flatten
 //
@@ -479,10 +478,15 @@ function evaluate(lines) {
         exportIdx++;
       }
 
-      // CHANGE: extract args via $name instead of [name].
-      const args = [...argsStr.matchAll(/\$(\w+)/g)].map(m => m[1]);
-      for (const arg of args) {
-        output.push(globalNames.has(arg) ? `global.get ${arg}` : `get $${arg}`);
+      for (const arg of argsStr.split(',').map(a => a.trim())) {
+        if (arg.startsWith('"')) {
+          const val = arg.slice(1, -1);
+          const type = (val.includes('.') || /[eE]/.test(val)) ? 'f32' : 'i32';
+          output.push(`const ${type} ${val}`);
+        } else {
+          const name = arg.slice(1); // strip $
+          output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
+        }
       }
 
       if (operation === 'callfn') {
@@ -500,10 +504,15 @@ function evaluate(lines) {
     const voidCallM = t.match(/^callfn\s+(\d+)\((.+)\)$/);
     if (voidCallM) {
       const [, index, argsStr] = voidCallM;
-      // CHANGE: extract args via $name instead of [name].
-      const args = [...argsStr.matchAll(/\$(\w+)/g)].map(m => m[1]);
-      for (const arg of args) {
-        output.push(globalNames.has(arg) ? `global.get ${arg}` : `get $${arg}`);
+      for (const arg of argsStr.split(',').map(a => a.trim())) {
+        if (arg.startsWith('"')) {
+          const val = arg.slice(1, -1);
+          const type = (val.includes('.') || /[eE]/.test(val)) ? 'f32' : 'i32';
+          output.push(`const ${type} ${val}`);
+        } else {
+          const name = arg.slice(1); // strip $
+          output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
+        }
       }
       output.push(`call ${index}`);
       continue;
