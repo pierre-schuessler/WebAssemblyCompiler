@@ -172,8 +172,6 @@ function encodeWasmInstruction(words) {
   return [Number(instr)]; // raw opcode fallback
 }
 
-
-
 // ─────────────────────────────────────────────────────────────────────────────
 // flatten
 //
@@ -184,6 +182,14 @@ function encodeWasmInstruction(words) {
 //
 // Rewritten to use '(' / ')' as the delimiters throughout, matching the syntax
 // callers actually write.
+//
+// CHANGE 1: All variable references now use $name syntax instead of [name].
+//   Quoted string literals ("42", "3.14") are passed through unchanged since
+//   they are constants, not names.
+//
+// CHANGE 2: Only nested calls are lifted into temp variables.  Plain
+//   identifier arguments are passed directly as $name — no pointless
+//   temp_N = $arg round-trip for leaf nodes.
 // ─────────────────────────────────────────────────────────────────────────────
 function flatten(line) {
   let output = [];
@@ -200,8 +206,8 @@ function flatten(line) {
     expr = expr.trim();
     const parenIdx = expr.indexOf("(");
     if (parenIdx === -1) {
-      // Leaf identifier — return bare name; caller wraps it in [brackets].
-      return expr;
+      // Leaf: quoted constants are returned bare; identifiers get the $ prefix.
+      return expr.startsWith('"') ? expr : `$${expr}`;
     }
 
     const funct = expr.slice(0, parenIdx).trim();
@@ -225,18 +231,20 @@ function flatten(line) {
     }
     if (current.trim()) args.push(current.trim());
 
-    const tempVars = [];
+    const argExprs = [];
     for (const arg of args) {
-      const tempName = `temp_${tempIndex++}`;
       if (arg.includes("(")) {
+        // Nested call — lift into a fresh temp variable.
+        const tempName = `temp_${tempIndex++}`;
         output.push(`${tempName} = ${_flatten(arg)}`);
+        argExprs.push(`$${tempName}`);
       } else {
-        output.push(`${tempName} = [${arg}]`);
+        // Leaf — use directly; _flatten adds $ or keeps the quoted literal.
+        argExprs.push(_flatten(arg));
       }
-      tempVars.push(tempName);
     }
 
-    return `${funct}(${tempVars.map(v => `[${v}]`).join(", ")})`;
+    return `${funct}(${argExprs.join(", ")})`;
   }
 
   const resultExpr = _flatten(line);
@@ -256,6 +264,12 @@ function flatten(line) {
 // keyword, so `global mut i32 counter` captured 'mut' as the type and 'i32'
 // as the name — completely backwards.  The regex now skips 'mut' before
 // matching type and name.
+//
+// CHANGE: Reference arguments are now written as $name instead of [name].
+//   The copy pattern matches either $varName or a quoted constant "value".
+//   The ref-extraction regex in the call branch uses /\$(\w+)/g instead of
+//   /\[(\w+)\]/g.  Annotated output carries the same $name / "value" tokens
+//   so that evaluate can consume them unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 function inferWasmTypes(lines) {
   const typeMap      = {};
@@ -309,14 +323,17 @@ function inferWasmTypes(lines) {
     const indent = line.match(/^(\s*)/)[1];
     const t      = line.trim();
 
-    const copyM = t.match(/^(\w+)\s*=\s*\[([^\]]+)\]$/);
+    // CHANGE: match $varName or "constant" on the RHS (was [name]).
+    const copyM = t.match(/^(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
     if (copyM) {
-      const [, varName, ref] = copyM;
-      const isConst      = ref.startsWith('"') && ref.endsWith('"');
-      const inferredType = isConst ? constType(ref.slice(1, -1)) : typeMap[ref];
+      const [, varName, rawVal] = copyM;
+      const isConst      = rawVal.startsWith('"');
+      const ref          = isConst ? rawVal.slice(1, -1) : rawVal.slice(1); // strip " or $
+      const inferredType = isConst ? constType(ref) : typeMap[ref];
       if (!inferredType) return line;
       typeMap[varName] = inferredType;
-      return `${indent}${inferredType} ${varName} = [${ref}]`;
+      // Preserve the original $name / "value" token in the annotated output.
+      return `${indent}${inferredType} ${varName} = ${rawVal}`;
     }
 
     const callM = t.match(/^(\w+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
@@ -330,7 +347,8 @@ function inferWasmTypes(lines) {
         return `${indent}${type} ${varName} = callfn ${index}(${argsStr})`;
       }
 
-      const refs         = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
+      // CHANGE: extract refs via $name instead of [name].
+      const refs         = [...argsStr.matchAll(/\$(\w+)/g)].map(m => m[1]);
       const inferredType = refs.map(r => typeMap[r]).find(tp => tp !== undefined);
       if (!inferredType) return line;
       typeMap[varName] = inferredType;
@@ -363,12 +381,17 @@ function inferWasmTypes(lines) {
 //
 // FIX 3 – `return varName` emitted `get $varName` even for globals; it now
 //   emits `global.get varName` when the name is in the global set.
+//
+// CHANGE: RHS of copy assignments is now $varName or "constant" (was [name]).
+//   The copy pattern is tightened to only match those two forms so it cannot
+//   accidentally shadow the call pattern.  Argument refs in call patterns use
+//   /\$(\w+)/g instead of /\[(\w+)\]/g.
 // ─────────────────────────────────────────────────────────────────────────────
 function evaluate(lines) {
   const output = [];
-  const globalNames = new Set();   // still global
+  const globalNames = new Set();
   let exportIdx = -1;
-  let knownLocals = new Set();     // now reset per function
+  let knownLocals = new Set();     // reset per function
 
   // Pre-scan globals
   for (const line of lines) {
@@ -377,7 +400,7 @@ function evaluate(lines) {
       const tokens = t.split(/\s+/);
       let i = 1;
       if (tokens[i] === 'mut') i++;
-      i++;
+      i++;                         // skip type
       if (tokens[i]) globalNames.add(tokens[i]);
     }
   }
@@ -409,7 +432,7 @@ function evaluate(lines) {
       output.push(line);
       continue;
     }
-    
+
     const returnM = t.match(/^return\s+(\w+)$/);
     if (returnM) {
       const name = returnM[1];
@@ -418,9 +441,11 @@ function evaluate(lines) {
       continue;
     }
 
-    const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*\[([^\]]+)\]$/);
+    // CHANGE: RHS is $varName or "constant" — use a tighter pattern so this
+    // branch cannot collide with the call pattern below.
+    const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
     if (copyM) {
-      const [, type, dest, src] = copyM;
+      const [, type, dest, rawVal] = copyM;
       if (type === 'void') continue;
 
       if (!globalNames.has(dest) && !knownLocals.has(dest)) {
@@ -429,13 +454,13 @@ function evaluate(lines) {
         exportIdx++;
       }
 
-      const isConst = src.startsWith('"') && src.endsWith('"');
+      const isConst = rawVal.startsWith('"');
       if (isConst) {
-        output.push(`const ${type} ${src.slice(1, -1)}`);
-      } else if (globalNames.has(src)) {
-        output.push(`global.get ${src}`);
+        const src = rawVal.slice(1, -1);
+        output.push(`const ${type} ${src}`);
       } else {
-        output.push(`get $${src}`);
+        const src = rawVal.slice(1); // strip leading $
+        output.push(globalNames.has(src) ? `global.get ${src}` : `get $${src}`);
       }
 
       output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
@@ -452,7 +477,8 @@ function evaluate(lines) {
         exportIdx++;
       }
 
-      const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
+      // CHANGE: extract args via $name instead of [name].
+      const args = [...argsStr.matchAll(/\$(\w+)/g)].map(m => m[1]);
       for (const arg of args) {
         output.push(globalNames.has(arg) ? `global.get ${arg}` : `get $${arg}`);
       }
@@ -472,7 +498,8 @@ function evaluate(lines) {
     const voidCallM = t.match(/^callfn\s+(\d+)\((.+)\)$/);
     if (voidCallM) {
       const [, index, argsStr] = voidCallM;
-      const args = [...argsStr.matchAll(/\[(\w+)\]/g)].map(m => m[1]);
+      // CHANGE: extract args via $name instead of [name].
+      const args = [...argsStr.matchAll(/\$(\w+)/g)].map(m => m[1]);
       for (const arg of args) {
         output.push(globalNames.has(arg) ? `global.get ${arg}` : `get $${arg}`);
       }
