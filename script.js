@@ -376,6 +376,8 @@ function print(html) {
   termOutput.scrollTop = termOutput.scrollHeight;
 }
 
+console.log = print;
+
 print(`<span class="c-info">WASM Assembler ready.</span>`);
 print(
   `<span class="c-muted">make · build · run &lt;fn&gt; [args] · hex · clear · help</span>`,
