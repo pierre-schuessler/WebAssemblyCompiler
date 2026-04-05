@@ -366,28 +366,6 @@ function inferWasmTypes(lines) {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// evaluate
-//
-// FIX 1 – Declaration skip was `t.startsWith("global")`, which also matched
-//   `global.get` and `global.set` instruction lines, causing them to be pushed
-//   verbatim and skipped by every subsequent handler.  Changed to
-//   `t.startsWith("global ")` (note trailing space) so only the declaration
-//   keyword is caught; instruction lines fall through normally.
-//
-// FIX 2 – Globals were being declared as locals and accessed via local.get/set.
-//   evaluate now pre-scans for `global` declarations, and for every reference to
-//   a global name emits `global.get` / `global.set` instead of `get $` / `set $`,
-//   and never inserts a `local` declaration for a global variable.
-//
-// FIX 3 – `return varName` emitted `get $varName` even for globals; it now
-//   emits `global.get varName` when the name is in the global set.
-//
-// CHANGE: RHS of copy assignments is now $varName or "constant" (was [name]).
-//   The copy pattern is tightened to only match those two forms so it cannot
-//   accidentally shadow the call pattern.  Argument refs in call patterns use
-//   /\$(\w+)/g instead of /\[(\w+)\]/g.
-// ─────────────────────────────────────────────────────────────────────────────
 function evaluate(lines) {
   const output = [];
   const globalNames = new Set();
@@ -410,7 +388,6 @@ function evaluate(lines) {
     const t = line.trim();
 
     if (t.startsWith("export")) {
-      // 🔥 RESET per function
       knownLocals = new Set();
       exportIdx = output.length;
 
@@ -427,8 +404,6 @@ function evaluate(lines) {
       continue;
     }
 
-    console.log("Found the following globals and locals: ", globalNames, knownLocals)
-
     if (t.startsWith("global ")) {
       output.push(line);
       continue;
@@ -442,8 +417,6 @@ function evaluate(lines) {
       continue;
     }
 
-    // CHANGE: RHS is $varName or "constant" — use a tighter pattern so this
-    // branch cannot collide with the call pattern below.
     const copyM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
     if (copyM) {
       const [, type, dest, rawVal] = copyM;
@@ -460,7 +433,7 @@ function evaluate(lines) {
         const src = rawVal.slice(1, -1);
         output.push(`const ${type} ${src}`);
       } else {
-        const src = rawVal.slice(1); // strip leading $
+        const src = rawVal.slice(1);
         output.push(globalNames.has(src) ? `global.get ${src}` : `get $${src}`);
       }
 
@@ -470,7 +443,7 @@ function evaluate(lines) {
 
     const callM = t.match(/^(\w+)\s+(\w+)\s*=\s*(\w+)\s+(\w+)\s*\((.+)\)$/);
     if (callM) {
-      const [, type, dest, operation, _opType, argsStr] = callM;
+      const [, type, dest, operation, opType, argsStr] = callM;
 
       if (type !== 'void' && !globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
@@ -478,11 +451,13 @@ function evaluate(lines) {
         exportIdx++;
       }
 
+      // FIX: emit constants using the operation's inferred type (opType) rather
+      // than re-deriving it from the literal value alone. This ensures that
+      // "10" alongside an i64 operation produces `const i64 10`, not `const i32 10`.
       for (const arg of argsStr.split(',').map(a => a.trim())) {
         if (arg.startsWith('"')) {
           const val = arg.slice(1, -1);
-          const type = (val.includes('.') || /[eE]/.test(val)) ? 'f32' : 'i32';
-          output.push(`const ${type} ${val}`);
+          output.push(`const ${opType} ${val}`);
         } else {
           const name = arg.slice(1); // strip $
           output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
@@ -490,7 +465,7 @@ function evaluate(lines) {
       }
 
       if (operation === 'callfn') {
-        output.push(`call ${_opType}`);
+        output.push(`call ${opType}`);
         if (type !== 'void') {
           output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
         }
@@ -507,8 +482,11 @@ function evaluate(lines) {
       for (const arg of argsStr.split(',').map(a => a.trim())) {
         if (arg.startsWith('"')) {
           const val = arg.slice(1, -1);
-          const type = (val.includes('.') || /[eE]/.test(val)) ? 'f32' : 'i32';
-          output.push(`const ${type} ${val}`);
+          // FIX: for void calls we have no opType from inferWasmTypes, so fall
+          // back to deriving the type from the literal (same behaviour as before,
+          // but isolated to the one place it is actually unavoidable).
+          const t2 = (val.includes('.') || /[eE]/.test(val)) ? 'f32' : 'i32';
+          output.push(`const ${t2} ${val}`);
         } else {
           const name = arg.slice(1); // strip $
           output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
