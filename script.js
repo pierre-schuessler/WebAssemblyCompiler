@@ -454,6 +454,9 @@ async function runCommand(raw) {
           );
           const argLabel = testArgs.join(", ");
           try {
+            print(
+              `<span class="c-muted">Running function ${esc(fn)}(${args.join(", ")})</span>`,
+            );
             const r = lastInstance.exports[fn](...testArgs);
             print(
               `<span class="c-muted">  ${esc(fn)}(${argLabel}) → </span><span class="c-ok">${r}</span>`,
@@ -490,7 +493,7 @@ async function runCommand(raw) {
       );
       const r = func(...args);
       print(
-        `<span class="c-muted">${esc(fn)}(${args.join(", ")}) -> </span><span class="c-ok">${r}</span>`,
+        `<span class="c-muted">${esc(fn)}(${args.join(", ")}) → </span><span class="c-ok">${r}</span>`,
       );
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
