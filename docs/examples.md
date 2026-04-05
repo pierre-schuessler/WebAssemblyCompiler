@@ -96,25 +96,29 @@ export umax i32 a i32 b => i32
 Imports are declared at the top. They are called by their local alias. If the import has a return value, assign it to a variable; if it is void, call it bare.
 
 ```
-import env.pow   pow   i32 i32  => i32
-import env.log   log   i32      => i32
-import env.print print i32
+memory 1
+data 0 "Hello, world!\0"
 
-; Wrap an imported function
-export myPow i32 base i32 exp => i32
-  result = pow(base, exp)
-  return result
+import env.putchar putchar i32
 
-; Chain calls: log the input, then square it
-export logAndSquare i32 x => i32
-  logged = log(x)
-  result = mul(logged, logged)
-  return result
+export printString i32 startNode
+  loop empty()
+    ;; 1. Load the byte from memory
+    char = load8_u(startNode)
+    
+    ;; 2. Call putchar immediately (sends the char, or 0, to JS)
+    putchar(char)
+    
+    ;; 3. Check if that character was the null terminator
+    isEnd = eqz(char)
+    if empty(isEnd)
+      return()
+    end()
 
-; Void call — no assignment
-export printDouble i32 x
-  doubled = mul(x, "2")
-  print(doubled)
+    ;; 4. Increment pointer and jump back to start of loop
+    startNode = add(startNode, "1")
+    br 0()
+  end()
 ```
 
 ---
@@ -139,52 +143,4 @@ export reset
 ; Return the current counter value
 export getCount => i32
   return counter
-```
-
----
-
-## Memory and data
-
-Declare `memory` in pages (64 KB each). Use `data` to place string or byte literals at a fixed offset.
-
-```
-memory 1
-data 0 "Hello, world!\0"
-
-import env.putchar putchar i32
-
-; Print each character of the string at address 0
-; (character-by-character manual unroll for illustration)
-export greet
-  c0 = load8_u("0")
-  putchar(c0)
-  c1 = load8_u("1")
-  putchar(c1)
-```
-
----
-
-## Multiple functions and imports
-
-Imports are indexed from 0. Exports follow in order. Use each function's local alias to call it.
-
-```
-import env.sin sin f32 => f32
-import env.cos cos f32 => f32
-
-; sin²(x) + cos²(x) — should always be 1.0
-export pythagorean f32 x => f32
-  s  = sin(x)
-  c  = cos(x)
-  s2 = mul(s, s)
-  c2 = mul(c, c)
-  result = add(s2, c2)
-  return result
-
-; Absolute value via subtract and comparison
-export myAbs i32 x => i32
-  neg    = sub("0", x)
-  isNeg  = lt_s(x, "0")
-  result = add(mul(isNeg, neg), mul(sub("1", isNeg), x))
-  return result
 ```
