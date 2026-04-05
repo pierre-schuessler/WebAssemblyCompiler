@@ -1,6 +1,6 @@
 # WebAssembly Compiler
 
-A lightweight in-browser WebAssembly assembler. Write a simple, human-readable expression-based language in the textarea, then compile and run it using the commands in the terminal at the bottom.
+A lightweight in-browser WebAssembly Compiler. Write a simple, human-readable expression-based language in the textarea, then compile and run it using the commands in the terminal at the bottom.
 
 ---
 

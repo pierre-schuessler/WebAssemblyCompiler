@@ -389,7 +389,7 @@ function print(html) {
 
 console.stdout = print;
 
-print(`<span class="c-info">WASM Assembler ready.</span>`);
+print(`<span class="c-info">WASM Compiler ready.</span>`);
 print(
   `<span class="c-muted">make · build · run &lt;fn&gt; [args] · hex · clear · help</span>`,
 );
@@ -403,7 +403,7 @@ async function runCommand(raw, isInternal = false) {
   if (!isInternal) {
     cmdHistory.unshift(cmd);
     histIdx = -1;
-    print(`<span class="c-prompt">wasm $ </span>${esc(cmd)}`);
+    print(`<span class="c-prompt"> $ </span>${esc(cmd)}`);
   }
 
   const parts = cmd.split(/\s+/),
