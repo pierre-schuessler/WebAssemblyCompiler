@@ -1,21 +1,48 @@
 # WebAssembly Compiler
 
-A lightweight in-browser WebAssembly assembler and runtime. Write a simple, human-readable assembly language in the textarea, then compile and run it using the simple to use commands in the terminal on the bottom.
+A lightweight in-browser WebAssembly assembler. Write a simple, human-readable expression-based language in the textarea, then compile and run it using the commands in the terminal at the bottom.
 
 ---
 
 ## How it works
 
-The assembler reads the source code line by line. Each line is either a **directive** (starting with `import` or `export`) or an **instruction**. Directives define the module's interface; instructions are the function bodies between them.
+The compiler takes source code through a four-stage pipeline before producing a binary:
 
-Functions are defined implicitly: every `export` line opens a new function, and all instruction lines that follow belong to it until the next `export` (or end of file). `import` lines must come before any `export`.
+**1. Flatten** — Nested function calls are lifted into temporary variables so every expression is a single operation. `add(mul(a, b), c)` becomes two assignment lines automatically.
 
-All further documentation can be found in the /docs/ folder.
+**2. Type inference** — Types are propagated from parameter and global declarations into every intermediate variable. You never write type annotations yourself.
+
+**3. Stack emission** — High-level assignments are lowered to WebAssembly's stack machine: loads, operations, and stores.
+
+**4. Assembling** — Variable names are replaced with numeric indices and the result is packed into a valid `.wasm` binary.
 
 ---
 
-## Future features
+## Source structure
 
-- **Comparison opcodes** — `eq`, `ne`, `lt`, `gt`, `le`, `ge` for proper branching on comparisons
-- **Local variable declarations** — declaring additional locals beyond function parameters
-- **Memory instructions** — `load`, `store`, and a memory section
+A source file is a sequence of top-level directives followed by function bodies. The order matters:
+
+1. `memory` (optional, at most one)
+2. `import` lines (zero or more)
+3. `global` lines (zero or more, may be interspersed with exports)
+4. `export` blocks — each `export` line opens a function; body lines follow until the next `export` or end of file
+
+Comments begin with `;` and run to the end of the line.
+
+```
+; optional memory declaration
+memory 1
+
+; imports must come before exports
+import env.log log i32 => i32
+
+; globals can be declared anywhere at the top level
+global mut i32 counter 0
+
+; functions: export header followed by body lines
+export myFunc i32 x => i32
+  result = add(x, "1")
+  return result
+```
+
+Full language reference is in `/docs/language.md`. Examples are in `/docs/examples.md`.
