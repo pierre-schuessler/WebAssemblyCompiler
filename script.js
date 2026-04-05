@@ -455,7 +455,7 @@ async function runCommand(raw) {
           const argLabel = testArgs.join(", ");
           try {
             print(
-              `<span class="c-muted">Running function ${esc(fn)}(${args.join(", ")})</span>`,
+              `<span class="c-muted">Running function ${esc(fn)}(${testArgs.join(", ")})</span>`,
             );
             const r = lastInstance.exports[fn](...testArgs);
             print(
