@@ -117,13 +117,13 @@ export hyp i32 a i32 b => i32
 
 ### Constant literals
 
-Numeric constants must be written as **quoted strings** in expression arguments. A constant is treated as `i32` if it contains no decimal point or exponent, and as `f32` otherwise.
+Numeric constants must be written as **quoted strings** in expression arguments. A constant is treated as `integers` if it contains no decimal point or exponent, and as `floats` otherwise. By default, they are `32-bit`. They can be prefixed with `64` to become `64-bit`.
 
 ```
 n = add(x, "10")         // x + 10  (i32)
 r = mul(x, "0.5")        // x * 0.5 (f32)
 k = "42"                 // constant 42 assigned to k (i32)
-pi = "3.14159"           // constant pi assigned (f32)
+pi = 64"3.14159"           // constant pi assigned (f64)
 ```
 
 ---
