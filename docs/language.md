@@ -291,9 +291,3 @@ These are called with the dotted name as the operation identifier.
 | `f64` | 64-bit float |
 
 The `empty` keyword is accepted in `import` / `export` signatures to indicate no return value, but you can simply omit the `=>` clause instead.
-
----
-
-## Current limitations
-
-Control-flow instructions (`if`/`else`/`end`, `block`, `loop`, `br`, `br_if`) are not yet supported in the expression syntax.
