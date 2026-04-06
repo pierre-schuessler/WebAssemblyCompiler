@@ -1,6 +1,5 @@
 import { compile, test } from "./compiler.js";
 
-// ── PANEL RESIZE ──────────────────────────────────
 
 function makeResizable(handleId, panelId, minW, maxW, storageKey) {
   const handle = document.getElementById(handleId);
@@ -9,12 +8,10 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
     startW,
     dragging = false;
 
-  // restore saved width
   const saved = localStorage.getItem(storageKey);
   if (saved) panel.style.width = saved + "px";
 
   handle.addEventListener("mousedown", (e) => {
-    // only resize when panel is open
     if (panel.classList.contains("collapsed")) return;
     dragging = true;
     startX = e.clientX;
@@ -43,7 +40,6 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
 makeResizable("resizeEnv", "sidePanel", 140, 520, "wasm-env-panel-w");
 makeResizable("resizeDocs", "docsPanel", 140, 520, "wasm-docs-panel-w");
 
-// ── DOCS ──────────────────────────────────────────
 
 const DOC_FILES = ["language.md", "examples.md"];
 
@@ -129,7 +125,6 @@ function renderMarkdown(md) {
   const codeBlocks = [];
   md = md.replace(/```[^\n]*\n([\s\S]*?)```/g, (_, code) => {
     const placeholder = `@@CODE_BLOCK_${codeBlocks.length}@@`;
-    // Escape HTML inside the code block now, before the global escape pass
     codeBlocks.push(
       code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     );
@@ -209,7 +204,6 @@ function renderMarkdown(md) {
   return md;
 }
 
-// ── ENV IMPORTS ───────────────────────────────────
 
 let envImports = [
   {
@@ -346,24 +340,20 @@ function buildEnvObject() {
   return env;
 }
 
-// ── ACTIVITY BAR ──────────────────────────────────
 
 document.getElementById("activityEnv").addEventListener("click", toggleEnvPanel);
 document.getElementById("activityDocs").addEventListener("click", toggleDocsPanel);
 
-// ── ENV FORM BUTTONS ──────────────────────────────
 
 document.getElementById("envAddBtn").addEventListener("click", () => openForm());
 document.getElementById("envCancelBtn").addEventListener("click", closeForm);
 document.getElementById("envSaveBtn").addEventListener("click", saveEnv);
 
-// ── DOCS BACK BUTTON ──────────────────────────────
 
 document.getElementById("docsBack").addEventListener("click", showDocsList);
 
 renderEnvList();
 
-// ── TERMINAL ──────────────────────────────────────
 
 const termOutput = document.getElementById("termOutput");
 const termInput = document.getElementById("termInput");
@@ -399,7 +389,6 @@ async function runCommand(raw, isInternal = false) {
   const cmd = raw.trim();
   if (!cmd) return;
 
-  // Only update history and print the prompt if it's a real user command
   if (!isInternal) {
     cmdHistory.unshift(cmd);
     histIdx = -1;
@@ -464,14 +453,11 @@ async function runCommand(raw, isInternal = false) {
   } 
   
   else if (verb === "make") {
-    // 1. Recursively call build
     await runCommand("build", true);
     print("");
     
-    // 2. If build failed or there's no instance, bail out
     if (!lastInstance) return;
 
-    // 3. Loop through exports and recursively call run
     const supplied = parts.slice(1).map(Number);
     const exps = Object.keys(lastInstance.exports);
     
@@ -483,7 +469,6 @@ async function runCommand(raw, isInternal = false) {
         i < supplied.length ? supplied[i] : 0,
       );
       
-      // Pass execution logic entirely to "run"
       await runCommand(`run ${fn} ${testArgs.join(" ")}`, true);
     }
   } 
@@ -542,7 +527,6 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-err">✗ unknown command: ${esc(verb)}</span>`);
   }
 
-  // Only print the trailing empty line for actual user inputs
   if (!isInternal) print("");
 }
 
@@ -571,7 +555,6 @@ termInput.addEventListener("keydown", (e) => {
 
 document.getElementById("panel").addEventListener("click", () => termInput.focus());
 
-// ── EDITOR ────────────────────────────────────────
 
 const codeEl = document.getElementById("code");
 const lineNums = document.getElementById("lineNumbers");
@@ -614,7 +597,6 @@ codeEl.addEventListener("keydown", (e) => {
   }
 });
 
-// ── MINIMAP ───────────────────────────────────────
 
 const minimapCanvas = document.getElementById("minimapCanvas");
 const minimapViewport = document.getElementById("minimapViewport");

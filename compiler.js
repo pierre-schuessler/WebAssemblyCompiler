@@ -50,16 +50,12 @@ function encodeWasmInstruction(words) {
   const b = Number(words[2]);
 
   const table = {
-    // ── Locals ───────────────────────────────────────────────────────────────
     get:          () => [0x20, ...encodeULEB128(a)],
     set:          () => [0x21, ...encodeULEB128(a)],
     tee:          () => [0x22, ...encodeULEB128(a)],
-    // ── Globals ──────────────────────────────────────────────────────────────
     "global.get": () => [0x23, ...encodeULEB128(a)],
     "global.set": () => [0x24, ...encodeULEB128(a)],
-    // ── Constants ────────────────────────────────────────────────────────────
     const:        () => ({f32: [0x43, ...encodeF32(a)], f64: [0x44, ...encodeF64(a)], i64: [0x42, ...encodeSLEB128(a)], i32: [0x41, ...encodeSLEB128(a)]})[type],
-    // ── Control Flow ─────────────────────────────────────────────────────────
     nop:          () => [0x01],
     unreachable:  () => [0x00],
     return:       () => [0x0f],
@@ -67,20 +63,16 @@ function encodeWasmInstruction(words) {
     select:       () => [0x1b],
     call:         () => [0x10, ...encodeULEB128(a)],
     call_indirect:() => [0x11, ...encodeULEB128(a), 0x00],
-    // ── Block Structures ─────────────────────────────────────────────────────
     block:        () => [0x02, bt[type]],
     loop:         () => [0x03, bt[type]],
     if:           () => [0x04, bt[type]],
     else:         () => [0x05],
     end:          () => [0x0b],
-    // ── Branches ─────────────────────────────────────────────────────────────
     br:           () => [0x0c, ...encodeULEB128(a)],
     br_if:        () => [0x0d, ...encodeULEB128(a)],
     br_table:     () => { const t = words.slice(1).map(Number); const d = t.pop(); return [0x0e, ...encodeULEB128(t.length), ...t.flatMap(encodeULEB128), ...encodeULEB128(d)]; },
-    // ── Memory Management ────────────────────────────────────────────────────
     "memory.size":() => [0x3f, 0x00],
     "memory.grow":() => [0x40, 0x00],
-    // ── Memory Loads ─────────────────────────────────────────────────────────
     load:         () => [{ i32: 0x28, i64: 0x29, f32: 0x2a, f64: 0x2b }[type], ...encodeULEB128(a ?? 2), ...encodeULEB128(b ?? 0)],
     load8_s:      () => [{ i32: 0x2c, i64: 0x30 }[type],                        ...encodeULEB128(a ?? 0), ...encodeULEB128(b ?? 0)],
     load8_u:      () => [{ i32: 0x2d, i64: 0x31 }[type],                        ...encodeULEB128(a ?? 0), ...encodeULEB128(b ?? 0)],
@@ -88,12 +80,10 @@ function encodeWasmInstruction(words) {
     load16_u:     () => [{ i32: 0x2f, i64: 0x33 }[type],                        ...encodeULEB128(a ?? 1), ...encodeULEB128(b ?? 0)],
     load32_s:     () => [{ i64: 0x34 }[type],                                    ...encodeULEB128(a ?? 2), ...encodeULEB128(b ?? 0)],
     load32_u:     () => [{ i64: 0x35 }[type],                                    ...encodeULEB128(a ?? 2), ...encodeULEB128(b ?? 0)],
-    // ── Memory Stores ────────────────────────────────────────────────────────
     store:        () => [{ i32: 0x36, i64: 0x37, f32: 0x38, f64: 0x39 }[type],  ...encodeULEB128(a ?? 2), ...encodeULEB128(b ?? 0)],
     store8:       () => [{ i32: 0x3a, i64: 0x3c }[type],                         ...encodeULEB128(a ?? 0), ...encodeULEB128(b ?? 0)],
     store16:      () => [{ i32: 0x3b, i64: 0x3d }[type],                         ...encodeULEB128(a ?? 1), ...encodeULEB128(b ?? 0)],
     store32:      () => [{ i64: 0x3e }[type],                                     ...encodeULEB128(a ?? 2), ...encodeULEB128(b ?? 0)],
-    // ── Arithmetic ───────────────────────────────────────────────────────────
     add:      () => [{ i32: 0x6a, i64: 0x7c, f32: 0x92, f64: 0xa0 }[type]],
     sub:      () => [{ i32: 0x6b, i64: 0x7d, f32: 0x93, f64: 0xa1 }[type]],
     mul:      () => [{ i32: 0x6c, i64: 0x7e, f32: 0x94, f64: 0xa2 }[type]],
@@ -123,7 +113,6 @@ function encodeWasmInstruction(words) {
     min:      () => [{ f32: 0x96, f64: 0xa4 }[type]],
     max:      () => [{ f32: 0x97, f64: 0xa5 }[type]],
     copysign: () => [{ f32: 0x98, f64: 0xa6 }[type]],
-    // ── Comparisons ──────────────────────────────────────────────────────────
     eqz:  () => [{ i32: 0x45, i64: 0x50 }[type]],
     eq:   () => [{ i32: 0x46, i64: 0x51, f32: 0x5b, f64: 0x61 }[type]],
     ne:   () => [{ i32: 0x47, i64: 0x52, f32: 0x5c, f64: 0x62 }[type]],
@@ -139,7 +128,6 @@ function encodeWasmInstruction(words) {
     ge_s: () => [{ i32: 0x4e, i64: 0x59 }[type]],
     ge_u: () => [{ i32: 0x4f, i64: 0x5a }[type]],
     ge:   () => [{ f32: 0x60, f64: 0x66 }[type]],
-    // ── Type Conversions ─────────────────────────────────────────────────────
     "i32.wrap":          () => [0xa7],
     "i32.trunc_s_f32":   () => [0xa8],
     "i32.trunc_u_f32":   () => [0xa9],
@@ -169,29 +157,10 @@ function encodeWasmInstruction(words) {
 
   const handler = table[instr];
   if (handler) return handler();
-  return [Number(instr)]; // raw opcode fallback
+  return [Number(instr)];
 }
 
 const TYPEMAP = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
-// ─────────────────────────────────────────────────────────────────────────────
-// flatten
-//
-// FIX: The original function used [brackets] as argument delimiters and depth
-// markers, so calls written with standard parentheses like add(a, b) produced
-// zero arguments — the arg-collection loop only counted '[' / ']' for depth,
-// meaning every paren-style call silently discarded all its arguments.
-//
-// Rewritten to use '(' / ')' as the delimiters throughout, matching the syntax
-// callers actually write.
-//
-// CHANGE 1: All variable references now use $name syntax instead of [name].
-//   Quoted string literals ("42", "3.14") are passed through unchanged since
-//   they are constants, not names.
-//
-// CHANGE 2: Only nested calls are lifted into temp variables.  Plain
-//   identifier arguments are passed directly as $name — no pointless
-//   temp_N = $arg round-trip for leaf nodes.
-// ─────────────────────────────────────────────────────────────────────────────
 function flatten(line) {
   let output = [];
   let tempIndex = 0;
@@ -207,13 +176,11 @@ function flatten(line) {
     expr = expr.trim();
     const parenIdx = expr.indexOf("(");
     if (parenIdx === -1) {
-      // Leaf: quoted constants are returned bare; identifiers get the $ prefix.
       return (expr.startsWith('"') || expr.startsWith('64"')) ? expr : `$${expr}`;
     }
 
     const funct = expr.slice(0, parenIdx).trim();
 
-    // Find the matching close-paren.
     let depth = 0, closeIdx = -1;
     for (let i = parenIdx; i < expr.length; i++) {
       if (expr[i] === '(') depth++;
@@ -221,7 +188,6 @@ function flatten(line) {
     }
     const inside = expr.slice(parenIdx + 1, closeIdx);
 
-    // Split arguments by comma at depth 0 inside the paren group.
     const args = [];
     let d = 0, current = "";
     for (const c of inside) {
@@ -235,12 +201,10 @@ function flatten(line) {
     const argExprs = [];
     for (const arg of args) {
       if (arg.includes("(")) {
-        // Nested call — lift into a fresh temp variable.
         const tempName = `temp_${tempIndex++}`;
         output.push(`${tempName} = ${_flatten(arg)}`);
         argExprs.push(`$${tempName}`);
       } else {
-        // Leaf — use directly; _flatten adds $ or keeps the quoted literal.
         argExprs.push(_flatten(arg));
       }
     }
@@ -258,20 +222,6 @@ function flatten(line) {
   return output;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// inferWasmTypes
-//
-// FIX: The global-declaration regex did not account for the optional 'mut'
-// keyword, so `global mut i32 counter` captured 'mut' as the type and 'i32'
-// as the name — completely backwards.  The regex now skips 'mut' before
-// matching type and name.
-//
-// CHANGE: Reference arguments are now written as $name instead of [name].
-//   The copy pattern matches either $varName or a quoted constant "value".
-//   The ref-extraction regex in the call branch uses /\$(\w+)/g instead of
-//   /\[(\w+)\]/g.  Annotated output carries the same $name / "value" tokens
-//   so that evaluate can consume them unchanged.
-// ─────────────────────────────────────────────────────────────────────────────
 function inferWasmTypes(lines) {
   const globalTypeMap = {};
   let   typeMap       = {};
@@ -279,7 +229,6 @@ function inferWasmTypes(lines) {
   const validTypes    = new Set(["i32", "i64", "f32", "f64"]);
   let importCount = 0, exportCount = 0;
 
-  // ── Pass 0: collect global, import, and export signatures ────────────────
   for (const line of lines) {
     const t = line.trim();
 
@@ -319,7 +268,6 @@ function inferWasmTypes(lines) {
   const constType = (raw, is64) =>
     (raw.includes('.') || /[eE]/.test(raw) ? 'f' : 'i') + (is64 ? '64' : '32');
 
-  // ── Pass 1: annotate variable types ──────────────────────────────────────
   typeMap = { ...globalTypeMap };
 
   return lines.map(line => {
@@ -545,14 +493,13 @@ function artificialize(lines) {
   const globalIndexMap = {};
   let nextGlobalIndex = 0;
 
-  // ---- 1. Collect globals ----
   for (const line of lines) {
     const t = line.trim();
     if (t.startsWith("global ")) {
       const tokens = t.split(/\s+/);
       let i = 1;
       if (tokens[i] === 'mut') i++;
-      i++; // skip type
+      i++;
       const name = tokens[i];
       if (name && !(name in globalIndexMap)) {
         globalIndexMap[name] = nextGlobalIndex++;
@@ -567,9 +514,7 @@ function artificialize(lines) {
     const line = lines[i];
     const t = line.trim();
 
-    // ---- Non-function lines ----
     if (!t.startsWith("export ")) {
-      // fix global.get/set outside functions
       const globalGetM = t.match(/^global\.get\s+(\w+)$/);
       if (globalGetM) {
         result.push(`global.get ${globalIndexMap[globalGetM[1]] ?? 0}`);
@@ -589,20 +534,17 @@ function artificialize(lines) {
       continue;
     }
 
-    // ---- Function block ----
     const funcLines = [];
     funcLines.push(line);
     i++;
 
-    // Consume all lines belonging to this function
     while (i < lines.length && !lines[i].trim().startsWith("export ")) {
       funcLines.push(lines[i]);
       i++;
     }
 
-    // ---- 2. Per-function locals ----
     const indexMap = {};
-    let nextIndex = 0; // Reset for every new function block
+    let nextIndex = 0;
 
     function assign(name) {
       if (!(name in indexMap)) {
@@ -610,12 +552,9 @@ function artificialize(lines) {
       }
     }
 
-    // ---- 2a. Parse parameters from the header ----
     const header = funcLines[0].trim();
-    // Remove 'export ' and split to handle: export funcName type paramName => returnType
     const headerTokens = header.replace(/^export\s+/, "").split(/\s+/);
     
-    // headerTokens[0] is the function name. Params start at index 1.
     let j = 1;
     while (j < headerTokens.length && headerTokens[j] !== '=>') {
       const type = headerTokens[j];
@@ -623,45 +562,37 @@ function artificialize(lines) {
 
       if (name && name !== '=>') {
         assign(name);
-        j += 2; // Move past type and name
+        j += 2;
       } else {
         break;
       }
     }
 
-    // ---- 2b. Collect locals from declarations and $assignments ----
     for (const l of funcLines) {
       const tt = l.trim();
 
-      // Skip non-body lines
       if (tt.startsWith("export") || tt.startsWith("global ")) continue;
 
-      // local declaration: local i32 temp
       const localDeclM = tt.match(/^local\s+\S+\s+(\w+)$/);
       if (localDeclM) {
         assign(localDeclM[1]);
         continue;
       }
 
-      // Variable assignment: $name = ...
-      // We only assign names that start with $ to avoid bumping index on opcodes
       const lhsM = tt.match(/\$(\w+)\s*=/);
       if (lhsM) {
         assign(lhsM[1]);
       }
     }
 
-    // ---- 2c. Rewrite function lines ----
     for (const l of funcLines) {
       const tt = l.trim();
 
-      // Keep headers and global definitions as is
       if (tt.startsWith("export") || tt.startsWith("global ")) {
         result.push(l);
         continue;
       }
 
-      // Replace global access with global indices
       const globalGetM = tt.match(/^global\.get\s+(\w+)$/);
       if (globalGetM) {
         result.push(l.replace(globalGetM[1], globalIndexMap[globalGetM[1]] ?? 0));
@@ -674,10 +605,9 @@ function artificialize(lines) {
         continue;
       }
 
-      // Replace locals $name with the assigned numeric index
       result.push(
         l.replace(/\$(\w+)/g, (_, name) => {
-          assign(name); // Safety check if missed in scan
+          assign(name);
           return String(indexMap[name]);
         })
       );
@@ -693,7 +623,6 @@ function preprocess(code) {
     .map((l) => l.replace(/\/\/.*$/, "").trim())
     .filter((l) => l.length > 0);
 
-  // Flatten nested calls into temp vars
   let temp = [];
   lines.forEach((line) => {
     if (line.startsWith("export") || line.startsWith("global") || line.startsWith("import")|| line.startsWith("memory") || line.startsWith("data")) {
@@ -705,15 +634,12 @@ function preprocess(code) {
   lines = temp;
   console.log("after flatten:", lines);
 
-  // Annotate variables with WASM types
   lines = inferWasmTypes(lines);
   console.log("after inferWasmTypes:", lines);
 
-  // Emit stack machine instructions
   lines = evaluate(lines);
   console.log("after evaluate:", lines);
 
-  // Replace variable names with numeric indices
   lines = artificialize(lines);
   console.log("after artificialize:", lines);
 
@@ -725,7 +651,7 @@ function preprocess(code) {
 
 export function compile(code) {
 
-  const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]; // magic + version
+  const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
   let types       = [],
       functions   = [],
       imports     = [],
@@ -908,7 +834,6 @@ export function compile(code) {
 
   const importFnCount = imports.length;
 
-  // ── Section 1: Type ───────────────────────────────────────────────────────
   {
     binary.push(0x01);
     let size = encodeULEB128(types.length).length;
@@ -919,7 +844,6 @@ export function compile(code) {
     });
   }
 
-  // ── Section 2: Import ─────────────────────────────────────────────────────
   if (imports.length) {
     binary.push(0x02);
     const encImp = imports.map((imp) => {
@@ -933,7 +857,6 @@ export function compile(code) {
     encImp.forEach((e) => binary.push(...e));
   }
 
-  // ── Section 3: Function ───────────────────────────────────────────────────
   {
     binary.push(0x03);
     let size = encodeULEB128(functions.length).length;
@@ -942,7 +865,6 @@ export function compile(code) {
     functions.forEach((f) => binary.push(...encodeULEB128(f)));
   }
 
-  // ── Section 5: Memory ─────────────────────────────────────────────────────
   if (memory) {
     const hasMax = memory.max != null;
     const minEnc = encodeULEB128(memory.min);
@@ -953,7 +875,6 @@ export function compile(code) {
     if (hasMax) binary.push(...maxEnc);
   }
 
-  // ── Section 6: Global ─────────────────────────────────────────────────────
   if (globals.length) {
     binary.push(0x06);
     let size = encodeULEB128(globals.length).length;
@@ -964,7 +885,6 @@ export function compile(code) {
     });
   }
 
-  // ── Section 7: Export ─────────────────────────────────────────────────────
   if (exports.length) {
     binary.push(0x07);
     let size = encodeULEB128(exports.length).length;
@@ -978,7 +898,6 @@ export function compile(code) {
     });
   }
 
-  // ── Section 10: Code ──────────────────────────────────────────────────────
   {
     binary.push(0x0a);
 
@@ -1006,7 +925,6 @@ export function compile(code) {
     bodies.forEach((b) => binary.push(...b));
   }
 
-  // ── Section 11: Data ──────────────────────────────────────────────────────
   if (dataSegs.length) {
     binary.push(0x0b);
     const segs = dataSegs.map((seg) => [
