@@ -273,18 +273,18 @@ function flatten(line) {
 //   so that evaluate can consume them unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 function inferWasmTypes(lines) {
-  const typeMap      = {};
-  const funcRegistry = {};          // name → { index, returnType }
-  const validTypes   = new Set(["i32", "i64", "f32", "f64"]);
+  const globalTypeMap = {};           // globals only — survives across functions
+  let   typeMap       = {};           // globals + current-function locals (reset per fn)
+  const funcRegistry  = {};           // name → { index, returnType, argTypes }
+  const validTypes    = new Set(["i32", "i64", "f32", "f64"]);
   let importCount = 0, exportCount = 0;
 
   // ── Pass 0: collect global, import, and export signatures ────────────────
   for (const line of lines) {
     const t = line.trim();
 
-    // FIX: optional 'mut' before the type token.
     const globalM = t.match(/^global\s+(?:mut\s+)?(\S+)\s+(\S+)/);
-    if (globalM) { typeMap[globalM[2]] = globalM[1]; continue; }
+    if (globalM) { globalTypeMap[globalM[2]] = globalM[1]; continue; }
 
     if (t.startsWith('import ')) {
       const tokens = t.slice(7).trim().split(/\s+/);
@@ -295,7 +295,7 @@ function inferWasmTypes(lines) {
       const arrow   = tokens.indexOf('=>');
       const retType = (arrow !== -1 && tokens[arrow + 1]) ? tokens[arrow + 1] : null;
       if (localName)
-        funcRegistry[localName] = { index: importCount, returnType: retType };
+        funcRegistry[localName] = { index: importCount, returnType: retType, argTypes: {} };
       importCount++;
       continue;
     }
@@ -304,14 +304,14 @@ function inferWasmTypes(lines) {
       const tokens   = t.slice(7).trim().split(/\s+/);
       const funcName = tokens[0];
       let i = 1;
+      const argTypes = {};                          // scoped to this function
       while (i < tokens.length && tokens[i] !== '=>') {
-        if (tokens[i + 1] && tokens[i + 1] !== '=>') { typeMap[tokens[i + 1]] = tokens[i]; i += 2; }
+        if (tokens[i + 1] && tokens[i + 1] !== '=>') { argTypes[tokens[i + 1]] = tokens[i]; i += 2; }
         else i++;
       }
       const arrow   = tokens.indexOf('=>');
       const retType = (arrow !== -1 && tokens[arrow + 1]) ? tokens[arrow + 1] : null;
-      if (retType) typeMap['__return__'] = retType;
-      funcRegistry[funcName] = { index: importCount + exportCount, returnType: retType };
+      funcRegistry[funcName] = { index: importCount + exportCount, returnType: retType, argTypes };
       exportCount++;
     }
   }
@@ -320,20 +320,28 @@ function inferWasmTypes(lines) {
     (raw.includes('.') || /[eE]/.test(raw)) ? 'f32' : 'i32';
 
   // ── Pass 1: annotate variable types ──────────────────────────────────────
+  // Seed typeMap with globals to start (before the first function).
+  typeMap = { ...globalTypeMap };
+
   return lines.map(line => {
     const indent = line.match(/^(\s*)/)[1];
     const t      = line.trim();
 
-    // CHANGE: match $varName or "constant" on the RHS (was [name]).
+    // New function boundary → reset locals, restore globals + this fn's args.
+    if (t.startsWith('export ')) {
+      const name = t.slice(7).trim().split(/\s+/)[0];
+      typeMap = { ...globalTypeMap, ...(funcRegistry[name]?.argTypes ?? {}) };
+      return line;   // export declaration line itself is not annotated
+    }
+
     const copyM = t.match(/^(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
     if (copyM) {
       const [, varName, rawVal] = copyM;
       const isConst      = rawVal.startsWith('"');
-      const ref          = isConst ? rawVal.slice(1, -1) : rawVal.slice(1); // strip " or $
+      const ref          = isConst ? rawVal.slice(1, -1) : rawVal.slice(1);
       const inferredType = isConst ? constType(ref) : typeMap[ref];
       if (!inferredType) return line;
       typeMap[varName] = inferredType;
-      // Preserve the original $name / "value" token in the annotated output.
       return `${indent}${inferredType} ${varName} = ${rawVal}`;
     }
 
@@ -348,7 +356,6 @@ function inferWasmTypes(lines) {
         return `${indent}${type} ${varName} = callfn ${index}(${argsStr})`;
       }
 
-      // CHANGE: extract refs via $name instead of [name].
       const refs         = [...argsStr.matchAll(/\$(\w+)/g)].map(m => m[1]);
       const inferredType = refs.map(r => typeMap[r]).find(tp => tp !== undefined);
       if (!inferredType) return line;
