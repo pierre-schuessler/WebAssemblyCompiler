@@ -208,7 +208,7 @@ function flatten(line) {
     const parenIdx = expr.indexOf("(");
     if (parenIdx === -1) {
       // Leaf: quoted constants are returned bare; identifiers get the $ prefix.
-      return expr.startsWith('"') ? expr : `$${expr}`;
+      return (expr.startsWith('"') || expr.startsWith('64"')) ? expr : `$${expr}`;
     }
 
     const funct = expr.slice(0, parenIdx).trim();
@@ -376,16 +376,15 @@ function evaluate(lines) {
   const output = [];
   const globalNames = new Set();
   let exportIdx = -1;
-  let knownLocals = new Set();     // reset per function
+  let knownLocals = new Set();
 
-  // Pre-scan globals
   for (const line of lines) {
     const t = line.trim();
     if (t.startsWith("global ")) {
       const tokens = t.split(/\s+/);
       let i = 1;
       if (tokens[i] === 'mut') i++;
-      i++;                         // skip type
+      i++;
       if (tokens[i]) globalNames.add(tokens[i]);
     }
   }
@@ -423,20 +422,20 @@ function evaluate(lines) {
       continue;
     }
 
-    // Handles direct copies/assignments: e.g., `i32 a = "1"` or `a = "1"`
-    const copyM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
+    const copyM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*(\$\w+|(?:64)?"[^"]*")$/);
     if (copyM) {
       const [, maybeType, dest, rawVal] = copyM;
-      
-      const isConst = rawVal.startsWith('"');
-      const src = isConst ? rawVal.slice(1, -1) : rawVal.slice(1);
-      
-      // If no type is provided, infer it from the constant or default to i32
+      const is64    = rawVal.startsWith('64"');
+      const isConst = is64 || rawVal.startsWith('"');
+      const src     = isConst ? rawVal.replace(/^(?:64)?"|"$/g, '') : rawVal.slice(1);
+
       let type = maybeType;
       if (!type) {
-        type = isConst && (src.includes('.') || /[eE]/.test(src)) ? 'f32' : 'i32';
+        type = isConst
+          ? (src.includes('.') || /[eE]/.test(src) ? 'f' : 'i') + (is64 ? '64' : '32')
+          : 'i32';
       }
-      
+
       if (!globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local ${type} ${dest}`);
@@ -453,19 +452,17 @@ function evaluate(lines) {
       continue;
     }
 
-    // Handles function/instruction calls: e.g., `i32 a = i32.add($b, "1")` or `a = load_u8("1")`
     const callM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*([^(]+)\((.*)\)$/);
     if (callM) {
       const [, maybeType, dest, rawOp, argsStr] = callM;
       const opStr = rawOp.trim();
 
-      // If no type is provided on the LHS, infer it from the operation string, default to i32
       let type = maybeType;
       if (!type) {
         if (opStr.includes('i64')) type = 'i64';
         else if (opStr.includes('f32')) type = 'f32';
         else if (opStr.includes('f64')) type = 'f64';
-        else type = 'i32'; // Fallback for things like load_u8
+        else type = 'i32';
       }
 
       if (!globalNames.has(dest) && !knownLocals.has(dest)) {
@@ -474,67 +471,64 @@ function evaluate(lines) {
         exportIdx++;
       }
 
-      // Filter out empty arguments safely
       const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
-      
+
       for (const arg of args) {
-        if (arg.startsWith('"')) {
-          const val = arg.slice(1, -1);
-          let constType = type; 
-          
-          // Refine constant type based on instruction string if needed
+        if (arg.startsWith('"') || arg.startsWith('64"')) {
+          const argIs64 = arg.startsWith('64"');
+          const val     = arg.replace(/^(?:64)?"|"$/g, '');
+          let constType = type;
+
           if (opStr.includes('i64')) constType = 'i64';
           else if (opStr.includes('f32')) constType = 'f32';
           else if (opStr.includes('f64')) constType = 'f64';
           else if (opStr.includes('i32')) constType = 'i32';
-          else if (val.includes('.') || /[eE]/.test(val)) constType = 'f32';
+          else constType = (val.includes('.') || /[eE]/.test(val) ? 'f' : 'i') + (argIs64 ? '64' : '32');
 
           output.push(`const ${constType} ${val}`);
         } else {
-          const name = arg.slice(1); // strip $
+          const name = arg.slice(1);
           output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
         }
       }
 
       if (opStr.startsWith('callfn ')) {
-        const idx = opStr.slice(7).trim();
-        output.push(`call ${idx}`);
+        output.push(`call ${opStr.slice(7).trim()}`);
       } else {
-        output.push(opStr); // Pushes the raw instruction string cleanly
+        output.push(opStr);
       }
-      
+
       output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       continue;
     }
 
-    // Handles void calls: e.g., `callfn 0($a)` or `drop()`
     const voidCallM = t.match(/^([^(]+)\((.*)\)$/);
     if (voidCallM) {
       const [, rawOp, argsStr] = voidCallM;
       const opStr = rawOp.trim();
-      
+
       const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
-      
+
       for (const arg of args) {
-        if (arg.startsWith('"')) {
-          const val = arg.slice(1, -1);
+        if (arg.startsWith('"') || arg.startsWith('64"')) {
+          const argIs64 = arg.startsWith('64"');
+          const val     = arg.replace(/^(?:64)?"|"$/g, '');
           let constType = 'i32';
-          
+
           if (opStr.includes('i64')) constType = 'i64';
           else if (opStr.includes('f32')) constType = 'f32';
           else if (opStr.includes('f64')) constType = 'f64';
-          else if (val.includes('.') || /[eE]/.test(val)) constType = 'f32';
+          else constType = (val.includes('.') || /[eE]/.test(val) ? 'f' : 'i') + (argIs64 ? '64' : '32');
 
           output.push(`const ${constType} ${val}`);
         } else {
-          const name = arg.slice(1); // strip $
+          const name = arg.slice(1);
           output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
         }
       }
 
       if (opStr.startsWith('callfn ')) {
-        const idx = opStr.slice(7).trim();
-        output.push(`call ${idx}`);
+        output.push(`call ${opStr.slice(7).trim()}`);
       } else {
         output.push(opStr);
       }
