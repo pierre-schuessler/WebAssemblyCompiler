@@ -119,6 +119,18 @@ body {
   display: block;
 }
 
+#code::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+#code::-webkit-scrollbar-track {
+  background: transparent;
+}
+#code::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 3px;
+}
+
 .activity-bar {
   width: 36px;
   min-width: 36px;
