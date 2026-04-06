@@ -273,9 +273,9 @@ function flatten(line) {
 //   so that evaluate can consume them unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 function inferWasmTypes(lines) {
-  const globalTypeMap = {};           // globals only — survives across functions
-  let   typeMap       = {};           // globals + current-function locals (reset per fn)
-  const funcRegistry  = {};           // name → { index, returnType, argTypes }
+  const globalTypeMap = {};
+  let   typeMap       = {};
+  const funcRegistry  = {};
   const validTypes    = new Set(["i32", "i64", "f32", "f64"]);
   let importCount = 0, exportCount = 0;
 
@@ -304,7 +304,7 @@ function inferWasmTypes(lines) {
       const tokens   = t.slice(7).trim().split(/\s+/);
       const funcName = tokens[0];
       let i = 1;
-      const argTypes = {};                          // scoped to this function
+      const argTypes = {};
       while (i < tokens.length && tokens[i] !== '=>') {
         if (tokens[i + 1] && tokens[i + 1] !== '=>') { argTypes[tokens[i + 1]] = tokens[i]; i += 2; }
         else i++;
@@ -316,30 +316,29 @@ function inferWasmTypes(lines) {
     }
   }
 
-  const constType = raw =>
-    (raw.includes('.') || /[eE]/.test(raw)) ? 'f32' : 'i32';
+  const constType = (raw, is64) =>
+    (raw.includes('.') || /[eE]/.test(raw) ? 'f' : 'i') + (is64 ? '64' : '32');
 
   // ── Pass 1: annotate variable types ──────────────────────────────────────
-  // Seed typeMap with globals to start (before the first function).
   typeMap = { ...globalTypeMap };
 
   return lines.map(line => {
     const indent = line.match(/^(\s*)/)[1];
     const t      = line.trim();
 
-    // New function boundary → reset locals, restore globals + this fn's args.
     if (t.startsWith('export ')) {
       const name = t.slice(7).trim().split(/\s+/)[0];
       typeMap = { ...globalTypeMap, ...(funcRegistry[name]?.argTypes ?? {}) };
-      return line;   // export declaration line itself is not annotated
+      return line;
     }
 
-    const copyM = t.match(/^(\w+)\s*=\s*(\$\w+|"[^"]*")$/);
+    const copyM = t.match(/^(\w+)\s*=\s*(\$\w+|(?:64)?"[^"]*")$/);
     if (copyM) {
       const [, varName, rawVal] = copyM;
-      const isConst      = rawVal.startsWith('"');
-      const ref          = isConst ? rawVal.slice(1, -1) : rawVal.slice(1);
-      const inferredType = isConst ? constType(ref) : typeMap[ref];
+      const is64         = rawVal.startsWith('64"');
+      const isConst      = is64 || rawVal.startsWith('"');
+      const ref          = isConst ? rawVal.replace(/^(?:64)?"|"$/g, '') : rawVal.slice(1);
+      const inferredType = isConst ? constType(ref, is64) : typeMap[ref];
       if (!inferredType) return line;
       typeMap[varName] = inferredType;
       return `${indent}${inferredType} ${varName} = ${rawVal}`;
