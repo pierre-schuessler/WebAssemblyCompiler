@@ -643,7 +643,9 @@ function preprocess(code) {
   lines = artificialize(lines);
   console.log("after artificialize:", lines);
 
-  lines = lines.join("\n").replace(/set (\w+)\nget \1/g, '').split("\n");
+  lines = lines.join("\n")
+             .replace(/(^|\n)set\s+(\w+)\s*\r?\n\s*get\s+\2(\n|$)/g, '$1')
+             .split("\n");
   console.log("after removing lines that immediatly cancel eachother out: ", lines)
 
   return lines;
