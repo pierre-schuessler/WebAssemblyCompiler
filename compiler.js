@@ -518,7 +518,16 @@ function evaluate(lines) {
     return result;
   }
 
-  return collapseSetGet(output);
+  function removeUnusedLocals(lines) {
+    return lines.filter(line => {
+      const localM = line.trim().match(/^local\s+\S+\s+(\w+)$/);
+      if (!localM) return true;
+      const varName = localM[1];
+      return lines.some(l => /^(get|set|tee) \$/.test(l.trim()) && l.trim().endsWith(`$${varName}`));
+    });
+  }
+
+  return removeUnusedLocals(collapseSetGet(output));
 }
 
 function artificialize(lines) {
