@@ -486,7 +486,39 @@ function evaluate(lines) {
     output.push(line);
   }
 
-  return output;
+  function collapseSetGet(lines) {
+    const result = [];
+    let i = 0;
+    while (i < lines.length) {
+      const t = lines[i].trim();
+      const setM = t.match(/^(set \$(\w+)|global\.set (\w+))$/);
+      if (setM && i + 1 < lines.length) {
+        const isGlobal = t.startsWith("global.");
+        const varName  = setM[2] ?? setM[3];
+        const getLine  = isGlobal ? `global.get ${varName}` : `get $${varName}`;
+
+        if (lines[i + 1].trim() === getLine) {
+          const teeLine = isGlobal ? `global.tee ${varName}` : `tee $${varName}`;
+
+          if (isGlobal) {
+            result.push(teeLine);
+          } else {
+            const usedAnywhere = lines.some((l, idx) => idx !== i + 1 && l.trim() === getLine);
+            if (usedAnywhere) {
+              result.push(teeLine);
+            }
+          }
+          i += 2;
+          continue;
+        }
+      }
+      result.push(lines[i]);
+      i++;
+    }
+    return result;
+  }
+
+  return collapseSetGet(output);
 }
 
 function artificialize(lines) {
