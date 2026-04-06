@@ -4,20 +4,6 @@ A lightweight in-browser WebAssembly Compiler. Write a simple, human-readable ex
 
 ---
 
-## How it works
-
-The compiler takes source code through a four-stage pipeline before producing a binary:
-
-**1. Flatten** — Nested function calls are lifted into temporary variables so every expression is a single operation. `add(mul(a, b), c)` becomes two assignment lines automatically.
-
-**2. Type inference** — Types are propagated from parameter and global declarations into every intermediate variable. You never write type annotations yourself.
-
-**3. Stack emission** — High-level assignments are lowered to WebAssembly's stack machine: loads, operations, and stores.
-
-**4. Assembling** — Variable names are replaced with numeric indices and the result is packed into a valid `.wasm` binary.
-
----
-
 ## Source structure
 
 A source file is a sequence of top-level directives followed by function bodies. The order matters:
