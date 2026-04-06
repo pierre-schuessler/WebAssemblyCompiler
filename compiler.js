@@ -718,6 +718,7 @@ function preprocess(code) {
   console.log("after artificialize:", lines);
 
   lines = lines.join("\n").replace(/set (\w+)\nget \1/g, '').split("\n");
+  console.log("after removing lines that immediatly cancel eachother out: ", lines)
 
   return lines;
 }
