@@ -489,6 +489,47 @@ function evaluate(lines) {
   return output;
 }
 
+function removeOrphanedLocals(lines) {
+  const result = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (!lines[i].trim().startsWith('export ')) {
+      result.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    const funcLines = [lines[i++]];
+    while (i < lines.length && !lines[i].trim().startsWith('export ')) {
+      funcLines.push(lines[i++]);
+    }
+
+    const declared = new Set();
+    for (const l of funcLines) {
+      const m = l.trim().match(/^local\s+\S+\s+(\w+)$/);
+      if (m) declared.add(m[1]);
+    }
+
+    const used = new Set();
+    for (const l of funcLines) {
+      const t = l.trim();
+      if (/^local\s+/.test(t)) continue;
+      for (const name of declared) {
+        if (new RegExp(`\\b${name}\\b`).test(t)) used.add(name);
+      }
+    }
+
+    for (const l of funcLines) {
+      const m = l.trim().match(/^local\s+\S+\s+(\w+)$/);
+      if (m && !used.has(m[1])) continue;
+      result.push(l);
+    }
+  }
+
+  return result;
+}
+
 function artificialize(lines) {
   const globalIndexMap = {};
   let nextGlobalIndex = 0;
@@ -637,15 +678,16 @@ function preprocess(code) {
   lines = inferWasmTypes(lines);
   console.log("after inferWasmTypes:", lines);
 
-  lines = lines.join("\n")
-             .replace(/(^|\n)set\s+(\w+)\s*\r?\n\s*get\s+\2(\n|$)/g, '$1')
-             .split("\n");
-  console.log("after removing lines that immediatly cancel eachother out: ", lines)
-
   lines = evaluate(lines);
-  console.log("after evaluate:", lines);
 
-  lines = artificialize(lines);
+  lines = lines.join("\n")
+    .replace(/(^|\n)(set \$(\w+))\n(get \$\3)(\n|$)/g, '$1')
+    .split("\n")
+    .filter(l => l.length > 0);
+
+  lines = removeOrphanedLocals(lines);
+
+lines = artificialize(lines);
   console.log("after artificialize:", lines);
 
   
