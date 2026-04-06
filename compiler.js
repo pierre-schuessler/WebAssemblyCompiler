@@ -696,7 +696,7 @@ function preprocess(code) {
   // Flatten nested calls into temp vars
   let temp = [];
   lines.forEach((line) => {
-    if (line.startsWith("export") || line.startsWith("global") || line.startsWith("import") || line.startsWith("return") || line.startsWith("memory") || line.startsWith("data")) {
+    if (line.startsWith("export") || line.startsWith("global") || line.startsWith("import")|| line.startsWith("memory") || line.startsWith("data")) {
       temp.push(line);
     } else {
       temp.push(...flatten(line));
