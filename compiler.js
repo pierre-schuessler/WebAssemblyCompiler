@@ -717,6 +717,8 @@ function preprocess(code) {
   lines = artificialize(lines);
   console.log("after artificialize:", lines);
 
+  lines.join("\n").replace(/set (\w+)\nget \1/g, '').split("\n");
+
   return lines;
 }
 
