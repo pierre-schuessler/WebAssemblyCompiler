@@ -211,7 +211,7 @@ function renderMarkdown(md) {
 // ─── Programs Panel ───────────────────────────────────────────────────────────
 // Admin-approved programs loaded from /programs/ — edit this list to match your files.
 // The first entry is opened by default when the panel is first opened.
-const PROG_FILES = ["hello_world"];
+const PROG_FILES = ["basics", "hello_world"];
 
 const progsCache = {};
 let userProgs = [];

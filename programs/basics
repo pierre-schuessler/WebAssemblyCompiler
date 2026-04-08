@@ -1,0 +1,42 @@
+global mut i32 counter 0
+
+import env.putchar putchar i32
+
+export add i32 a i32 b => i32
+    result = add(a, b)
+    return(result)
+
+export double i32 a => i32
+    result = mul(a, "2")
+    return(result)
+
+export circle_area f32 radius => f32
+    area = mul("3.14159265359", mul(radius, radius))
+    return(area)
+
+export isEqual i32 x i32 y => i32
+  result = eq(x, y)
+  return result
+
+export isZero i32 x => i32
+  result = eqz(x)
+  return result
+
+export umax i32 a i32 b => i32
+  diff    = sub(a, b)
+  cond    = gt_u(a, b)
+  product = mul(diff, cond)
+  result  = add(b, product)
+  return result
+
+export increment_counter => i32
+    counter = add(counter, "1")
+    return("0")
+
+export get_counter =>
+    return(counter)
+
+export print_A => i32
+    putchar("65")
+    putchar("0")
+    return("0") // success
