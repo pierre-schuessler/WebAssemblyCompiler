@@ -2,7 +2,7 @@ global mut i32 counter 0
 
 import env.putchar putchar i32
 
-export add i32 a i32 b => i32
+export sum i32 a i32 b => i32
     result = add(a, b)
     return(result)
 
@@ -31,9 +31,9 @@ export umax i32 a i32 b => i32
 
 export increment_counter => i32
     counter = add(counter, "1")
-    return("0")
+    return(counter)
 
-export get_counter =>
+export get_counter => i32
     return(counter)
 
 export print_A => i32
