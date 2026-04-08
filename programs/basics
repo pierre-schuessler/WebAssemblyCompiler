@@ -16,18 +16,18 @@ export circle_area f32 radius => f32
 
 export isEqual i32 x i32 y => i32
   result = eq(x, y)
-  return result
+  return(result)
 
 export isZero i32 x => i32
   result = eqz(x)
-  return result
+  return(result)
 
 export umax i32 a i32 b => i32
   diff    = sub(a, b)
   cond    = gt_u(a, b)
   product = mul(diff, cond)
   result  = add(b, product)
-  return result
+  return(result)
 
 export increment_counter => i32
     counter = add(counter, "1")
