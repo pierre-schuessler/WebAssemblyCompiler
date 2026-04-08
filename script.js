@@ -211,7 +211,7 @@ function renderMarkdown(md) {
 // ─── Programs Panel ───────────────────────────────────────────────────────────
 // Admin-approved programs loaded from /programs/ — edit this list to match your files.
 // The first entry is opened by default when the panel is first opened.
-const PROG_FILES = ["hello_world.wat", "fibonacci.wat", "factorial.wat"];
+const PROG_FILES = ["hello_world"];
 
 const progsCache = {};
 let userProgs = [];
@@ -241,7 +241,7 @@ function renderProgList() {
   let html = "";
 
   if (PROG_FILES.length > 0) {
-    html += `<div class="prog-section-label">Approved</div>`;
+    html += `<div class="prog-section-label">Official programs</div>`;
     html += PROG_FILES.map((name) => {
       const active = activeProg && !activeProg.isUser && activeProg.name === name;
       return `<div class="prog-file-item prog-admin${active ? " active" : ""}" data-name="${esc(name)}" data-user="0">
