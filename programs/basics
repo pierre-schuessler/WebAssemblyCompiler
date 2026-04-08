@@ -1,42 +1,41 @@
-global mut i32 counter 0
+global mut i32 counter 0 // create a mutable global called counter of type i32 and initialized at 0
 
-import env.putchar putchar i32
+import env.putchar putchar i32 // import the putchar function
 
-export sum i32 a i32 b => i32
+export sum i32 a i32 b => i32 // add two numbers together
     result = add(a, b)
     return(result)
 
-export double i32 a => i32
+export double i32 a => i32 // double the input value
     result = mul(a, "2")
     return(result)
 
-export circle_area f32 radius => f32
+export circle_area f32 radius => f32 // compute the area of a circle of radius r
     area = mul("3.14159265359", mul(radius, radius))
     return(area)
 
-export isEqual i32 x i32 y => i32
+export isEqual i32 x i32 y => i32 // returns 1 if x == y, otherwise returns 0
   result = eq(x, y)
   return(result)
 
-export isZero i32 x => i32
+export isZero i32 x => i32 // return 1 if x == 0, otherwise returns 0
   result = eqz(x)
   return(result)
 
-export umax i32 a i32 b => i32
+export umax i32 a i32 b => i32 // returns the highest of the two values
   diff    = sub(a, b)
   cond    = gt_u(a, b)
   product = mul(diff, cond)
   result  = add(b, product)
   return(result)
 
-export increment_counter => i32
+export increment_counter => i32 // adds 1 to the counter global
     counter = add(counter, "1")
     return(counter)
 
-export get_counter => i32
+export get_counter => i32 // gets the value of the global counter without changing it
     return(counter)
 
-export print_A => i32
+export print_A // prints the letter 'A' (ascii code 65) and triggers rendering with '\0' (ascii code 0)
     putchar("65")
     putchar("0")
-    return("0") // success
