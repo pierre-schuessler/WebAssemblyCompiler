@@ -367,7 +367,6 @@ function closeProgNewForm() {
 function createNewProg() {
   let name = document.getElementById("progNewName").value.trim();
   if (!name) { document.getElementById("progNewName").focus(); return; }
-  if (!name.includes(".")) name += ".wat";
   autoSaveCurrentProg();
   userProgs.push({ name, code: "" });
   try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
