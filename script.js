@@ -39,6 +39,7 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
 
 makeResizable("resizeEnv", "sidePanel", 140, 520, "wasm-env-panel-w");
 makeResizable("resizeDocs", "docsPanel", 140, 520, "wasm-docs-panel-w");
+makeResizable("resizeProg", "progPanel", 140, 520, "wasm-prog-panel-w)")
 
 
 const DOC_FILES = ["language.md", "examples.md"];
@@ -340,9 +341,18 @@ function buildEnvObject() {
   return env;
 }
 
+function toggleProgPanel() {
+  const panel = document.getElementById("progPanel");
+  const btn = document.getElementById("activityProg");
+  const collapsed = panel.classList.toggle("collapsed");
+  btn.classList.toggle("active", !collapsed);
+}
+
+
 
 document.getElementById("activityEnv").addEventListener("click", toggleEnvPanel);
 document.getElementById("activityDocs").addEventListener("click", toggleDocsPanel);
+document.getElementById("activityProg").addEventListener("click", toggleProgPanel);
 
 
 document.getElementById("envAddBtn").addEventListener("click", () => openForm());
