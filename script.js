@@ -228,10 +228,10 @@ function toggleProgPanel() {
   btn.classList.toggle("active", !collapsed);
   if (!collapsed) {
     renderProgList();
-    // Auto-load the default program on first open
+    
     if (!progPanelInited && PROG_FILES.length > 0) {
       progPanelInited = true;
-      loadAdminProg(PROG_FILES[0]);
+      //loadAdminProg(PROG_FILES[0]);
     }
   }
 }
