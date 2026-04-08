@@ -39,8 +39,10 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
 
 makeResizable("resizeEnv", "sidePanel", 140, 520, "wasm-env-panel-w");
 makeResizable("resizeDocs", "docsPanel", 140, 520, "wasm-docs-panel-w");
-makeResizable("resizeProg", "progPanel", 140, 520, "wasm-prog-panel-w)")
+makeResizable("resizeProg", "progPanel", 140, 520, "wasm-prog-panel-w");
 
+
+// ─── Docs Panel ───────────────────────────────────────────────────────────────
 
 const DOC_FILES = ["language.md", "examples.md"];
 
@@ -206,6 +208,182 @@ function renderMarkdown(md) {
 }
 
 
+// ─── Programs Panel ───────────────────────────────────────────────────────────
+// Admin-approved programs loaded from /programs/ — edit this list to match your files.
+// The first entry is opened by default when the panel is first opened.
+const PROG_FILES = ["hello_world.wat", "fibonacci.wat", "factorial.wat"];
+
+const progsCache = {};
+let userProgs = [];
+try { userProgs = JSON.parse(localStorage.getItem("wasm-user-progs") || "[]"); } catch {}
+// userProgs: [{name, code}]
+
+let activeProg = null; // {name, isUser, idx?}
+let progPanelInited = false;
+
+function toggleProgPanel() {
+  const panel = document.getElementById("progPanel");
+  const btn = document.getElementById("activityProg");
+  const collapsed = panel.classList.toggle("collapsed");
+  btn.classList.toggle("active", !collapsed);
+  if (!collapsed) {
+    renderProgList();
+    // Auto-load the default program on first open
+    if (!progPanelInited && PROG_FILES.length > 0) {
+      progPanelInited = true;
+      loadAdminProg(PROG_FILES[0]);
+    }
+  }
+}
+
+function renderProgList() {
+  const list = document.getElementById("progFileList");
+  let html = "";
+
+  if (PROG_FILES.length > 0) {
+    html += `<div class="prog-section-label">Approved</div>`;
+    html += PROG_FILES.map((name) => {
+      const active = activeProg && !activeProg.isUser && activeProg.name === name;
+      return `<div class="prog-file-item prog-admin${active ? " active" : ""}" data-name="${esc(name)}" data-user="0">
+        <span class="prog-file-icon">★</span>
+        <span class="prog-file-name">${esc(name)}</span>
+      </div>`;
+    }).join("");
+  }
+
+  if (userProgs.length > 0) {
+    html += `<div class="prog-section-label">My Scripts</div>`;
+    html += userProgs.map((p, i) => {
+      const active = activeProg && activeProg.isUser && activeProg.idx === i;
+      return `<div class="prog-file-item${active ? " active" : ""}" data-name="${esc(p.name)}" data-user="1" data-idx="${i}">
+        <span class="prog-file-icon">▸</span>
+        <span class="prog-file-name">${esc(p.name)}</span>
+        <button class="prog-del-btn" data-idx="${i}" title="Delete">✕</button>
+      </div>`;
+    }).join("");
+  }
+
+  if (!PROG_FILES.length && !userProgs.length) {
+    html = `<div class="env-empty">No programs yet.<br>Click + to create one.</div>`;
+  }
+
+  list.innerHTML = html;
+
+  list.querySelectorAll(".prog-file-item").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target.classList.contains("prog-del-btn")) return;
+      if (el.dataset.user === "1") {
+        loadUserProg(Number(el.dataset.idx));
+      } else {
+        loadAdminProg(el.dataset.name);
+      }
+    });
+  });
+
+  list.querySelectorAll(".prog-del-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteUserProg(Number(btn.dataset.idx));
+    });
+  });
+}
+
+async function loadAdminProg(name) {
+  autoSaveCurrentProg();
+  activeProg = { name, isUser: false };
+  renderProgList();
+
+  if (typeof progsCache[name] === "string") {
+    document.getElementById("code").value = progsCache[name];
+    updateLineNumbers();
+    print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(name)}</span>`);
+    print("");
+    return;
+  }
+
+  print(`<span class="c-muted">loading ${esc(name)}…</span>`);
+  try {
+    const res = await fetch(`programs/${name}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`);
+    const text = await res.text();
+    progsCache[name] = text;
+    if (activeProg && activeProg.name === name && !activeProg.isUser) {
+      document.getElementById("code").value = text;
+      updateLineNumbers();
+    }
+    print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(name)}</span>`);
+    print("");
+  } catch (err) {
+    print(`<span class="c-err">✗ failed to load ${esc(name)}: ${esc(err.message)}</span>`);
+    print("");
+  }
+}
+
+function loadUserProg(idx) {
+  autoSaveCurrentProg();
+  activeProg = { isUser: true, idx, name: userProgs[idx].name };
+  renderProgList();
+  document.getElementById("code").value = userProgs[idx].code;
+  updateLineNumbers();
+  print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(userProgs[idx].name)}</span>`);
+  print("");
+}
+
+function autoSaveCurrentProg() {
+  if (!activeProg || !activeProg.isUser) return;
+  if (activeProg.idx >= userProgs.length) return;
+  userProgs[activeProg.idx].code = document.getElementById("code").value;
+  try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
+}
+
+function deleteUserProg(idx) {
+  const name = userProgs[idx].name;
+  userProgs.splice(idx, 1);
+  try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
+  if (activeProg && activeProg.isUser) {
+    if (activeProg.idx === idx) {
+      activeProg = null;
+      document.getElementById("code").value = "";
+      updateLineNumbers();
+    } else if (activeProg.idx > idx) {
+      activeProg.idx--;
+    }
+  }
+  renderProgList();
+  print(`<span class="c-muted">deleted: </span><span class="c-warn">${esc(name)}</span>`);
+  print("");
+}
+
+function openProgNewForm() {
+  document.getElementById("progNewForm").classList.remove("hidden");
+  document.getElementById("progNewName").value = "";
+  document.getElementById("progNewName").focus();
+}
+
+function closeProgNewForm() {
+  document.getElementById("progNewForm").classList.add("hidden");
+}
+
+function createNewProg() {
+  let name = document.getElementById("progNewName").value.trim();
+  if (!name) { document.getElementById("progNewName").focus(); return; }
+  if (!name.includes(".")) name += ".wat";
+  autoSaveCurrentProg();
+  userProgs.push({ name, code: "" });
+  try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
+  const idx = userProgs.length - 1;
+  activeProg = { isUser: true, idx, name };
+  document.getElementById("code").value = "";
+  updateLineNumbers();
+  closeProgNewForm();
+  renderProgList();
+  print(`<span class="c-muted">created: </span><span class="c-ok">${esc(name)}</span>`);
+  print("");
+}
+
+
+// ─── Env Panel ────────────────────────────────────────────────────────────────
+
 let envImports = [
   {
     name: "pow",
@@ -341,29 +519,39 @@ function buildEnvObject() {
   return env;
 }
 
-function toggleProgPanel() {
-  const panel = document.getElementById("progPanel");
-  const btn = document.getElementById("activityProg");
-  const collapsed = panel.classList.toggle("collapsed");
-  btn.classList.toggle("active", !collapsed);
-}
 
-
+// ─── Activity Bar Listeners ───────────────────────────────────────────────────
 
 document.getElementById("activityEnv").addEventListener("click", toggleEnvPanel);
 document.getElementById("activityDocs").addEventListener("click", toggleDocsPanel);
 document.getElementById("activityProg").addEventListener("click", toggleProgPanel);
 
-
 document.getElementById("envAddBtn").addEventListener("click", () => openForm());
 document.getElementById("envCancelBtn").addEventListener("click", closeForm);
 document.getElementById("envSaveBtn").addEventListener("click", saveEnv);
 
-
 document.getElementById("docsBack").addEventListener("click", showDocsList);
+
+document.getElementById("progAddBtn").addEventListener("click", openProgNewForm);
+document.getElementById("progNewCancel").addEventListener("click", closeProgNewForm);
+document.getElementById("progNewSave").addEventListener("click", createNewProg);
+document.getElementById("progNewName").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") createNewProg();
+  if (e.key === "Escape") closeProgNewForm();
+});
+
+// Auto-save user program when the editor content changes
+document.getElementById("code").addEventListener("input", () => {
+  if (activeProg && activeProg.isUser) {
+    userProgs[activeProg.idx].code = document.getElementById("code").value;
+    try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
+  }
+});
 
 renderEnvList();
 
+
+// ─── Terminal ─────────────────────────────────────────────────────────────────
 
 const termOutput = document.getElementById("termOutput");
 const termInput = document.getElementById("termInput");
@@ -414,30 +602,30 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-muted">  make [args]   — compile &amp; test exports with given args (padded with 0s)</span>`);
     print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
     print(`<span class="c-muted">  clear         — clear terminal</span>`);
-  } 
-  
+  }
+
   else if (verb === "clear") {
     termOutput.innerHTML = "";
-  } 
-  
+  }
+
   else if (verb === "build") {
     const code = document.getElementById("code").value;
     if (!code.trim()) {
       print(`<span class="c-err">editor is empty</span>`);
       return;
     }
-    
+
     print(`<span class="c-muted">compiling…</span>`);
-    
+
     try {
       const binary = compile(code);
       if (!binary) throw new Error("compile() returned null");
-      
+
       lastBinary = binary;
       lastMeta = binary.meta || {};
-      
+
       print(`<span class="c-ok">✓ ${binary.length} bytes</span>`);
-      
+
       let hex = "";
       const lim = Math.min(binary.length, 48);
       for (let i = 0; i < lim; i++) {
@@ -447,62 +635,61 @@ async function runCommand(raw, isInternal = false) {
         hex += `<span class="c-muted">… +${binary.length - 48}</span>`;
       }
       print(`<span class="c-hex">${hex}</span>`);
-      
+
       const mod = await WebAssembly.compile(binary);
       lastInstance = await WebAssembly.instantiate(mod, {
         env: buildEnvObject(),
       });
-      
+
       const exps = Object.keys(lastInstance.exports);
       print(`<span class="c-muted">exports: </span><span class="c-ok">${exps.map(esc).join(", ")}</span>`);
-      
-      
+
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
     }
-  } 
-  
+  }
+
   else if (verb === "make") {
     await runCommand("build", true);
     print("");
-    
+
     if (!lastInstance) return;
 
     const supplied = parts.slice(1).map(Number);
     const exps = Object.keys(lastInstance.exports);
-    
+
     for (const fn of exps) {
       if (typeof lastInstance.exports[fn] !== "function") continue;
-      
+
       const needed = lastMeta[fn] ?? supplied.length;
       const testArgs = Array.from({ length: needed }, (_, i) =>
         i < supplied.length ? supplied[i] : 0,
       );
-      
+
       await runCommand(`run ${fn} ${testArgs.join(" ")}`, true);
     }
-  } 
-  
+  }
+
   else if (verb === "run") {
     if (!lastInstance) {
       print(`<span class="c-warn">⚠ run build/make first</span>`);
       return;
     }
-    
+
     const fn = parts[1],
       args = parts.slice(2).map(Number);
-      
+
     if (!fn) {
       print(`<span class="c-err">usage: run &lt;fn&gt; [args]</span>`);
       return;
     }
-    
+
     const func = lastInstance.exports[fn];
     if (!func || typeof func !== "function") {
       print(`<span class="c-err">✗ no export "${esc(fn)}"</span>`);
       return;
     }
-    
+
     try {
       print(`<span class="c-muted">Running function ${esc(fn)}(${args.join(", ")})</span>`);
       const r = func(...args);
@@ -510,13 +697,13 @@ async function runCommand(raw, isInternal = false) {
     } catch (e) {
       print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
     }
-  } 
-  
+  }
+
   else if (verb === "test") {
     let args = parts.slice(1);
     print(test(...args));
-  } 
-  
+  }
+
   else if (verb === "hex") {
     if (!lastBinary) {
       print(`<span class="c-warn">⚠ run build first</span>`);
@@ -531,8 +718,8 @@ async function runCommand(raw, isInternal = false) {
       }
     }
     if (row) print(`<span class="c-hex">${row}</span>`);
-  } 
-  
+  }
+
   else {
     print(`<span class="c-err">✗ unknown command: ${esc(verb)}</span>`);
   }
@@ -565,6 +752,8 @@ termInput.addEventListener("keydown", (e) => {
 
 document.getElementById("panel").addEventListener("click", () => termInput.focus());
 
+
+// ─── Editor: Line Numbers & Minimap ──────────────────────────────────────────
 
 const codeEl = document.getElementById("code");
 const lineNums = document.getElementById("lineNumbers");
