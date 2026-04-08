@@ -491,22 +491,18 @@ function evaluate(lines) {
     let i = 0;
     while (i < lines.length) {
       const t = lines[i].trim();
-      const setM = t.match(/^(set \$(\w+)|global\.set (\w+))$/);
+      const setM = t.match(/^set \$(\w+)$/);
+      
       if (setM && i + 1 < lines.length) {
-        const isGlobal = t.startsWith("global.");
-        const varName  = setM[2] ?? setM[3];
-        const getLine  = isGlobal ? `global.get ${varName}` : `get $${varName}`;
+        const varName = setM[1];
+        const getLine = `get $${varName}`;
 
         if (lines[i + 1].trim() === getLine) {
-          const teeLine = isGlobal ? `global.tee ${varName}` : `tee $${varName}`;
-
-          if (isGlobal) {
+          const teeLine = `tee $${varName}`;
+          const usedAnywhere = lines.some((l, idx) => idx !== i + 1 && l.trim() === getLine);
+          
+          if (usedAnywhere) {
             result.push(teeLine);
-          } else {
-            const usedAnywhere = lines.some((l, idx) => idx !== i + 1 && l.trim() === getLine);
-            if (usedAnywhere) {
-              result.push(teeLine);
-            }
           }
           i += 2;
           continue;
