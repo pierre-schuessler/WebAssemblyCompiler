@@ -332,7 +332,7 @@ function evaluate(lines) {
       const tokens = t.split(/\s+/);
       let i = 1;
       if (tokens[i] === 'mut') i++;
-      i++;
+      i++; // skip type
       if (tokens[i]) globalNames.add(tokens[i]);
     }
   }
@@ -536,7 +536,7 @@ function artificialize(lines) {
       const tokens = t.split(/\s+/);
       let i = 1;
       if (tokens[i] === 'mut') i++;
-      i++;
+      i++; // skip type
       const name = tokens[i];
       if (name && !(name in globalIndexMap)) {
         globalIndexMap[name] = nextGlobalIndex++;
@@ -766,16 +766,18 @@ export function compile(code) {
         let j = 1;
         const mutable = words[j] === "mut" ? (j++, true) : false;
 
+        // type comes before name: global [mut] <type> <name> [initValue]
+        const gtypeStr = words[j++];
+        const gtype = TYPEMAP[gtypeStr];
+        if (gtype == null) throw new Error(`Unknown global type: '${gtypeStr}'`);
+
+        // name is optional — if the next token looks like a number or is absent, auto-name
         let gname;
-        if (TYPEMAP[words[j]] == null) {
+        if (words[j] !== undefined && isNaN(Number(words[j]))) {
           gname = words[j++];
         } else {
           gname = `$g${globals.length}`;
         }
-
-        const gtypeStr = words[j++];
-        const gtype = TYPEMAP[gtypeStr];
-        if (gtype == null) throw new Error(`Unknown global type: '${gtypeStr}'`);
 
         const initVal = Number(words[j] ?? 0);
         const initExpr = encodeInitExpr(gtypeStr, initVal);
