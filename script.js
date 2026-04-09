@@ -390,17 +390,7 @@ let envImports = [
     body: "return Math.pow(a, b)|0;",
   },
   { name: "log", sig: "i32 => i32", body: "console.log(a); return a;" },
-  { name: "putchar", sig: "i32", body: `
-      if (a === 10) {
-        console.stdout(window.message);
-        window.message = "";
-        return;
-  }
-      if (window.message) {
-        window.message += String.fromCharCode(a);
-      } else {
-        window.message = String.fromCharCode(a);
-      }`}
+  { name: "putchar", sig: "i32", body: `console.stdout(String.fromCharCode(a));`}
 ];
 let editingIdx = null;
 
