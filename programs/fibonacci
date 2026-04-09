@@ -1,5 +1,5 @@
 memory 1
-data 0 "String to print\0"
+data 0 "Fibonacci of 10 is: \0"
 
 import env.putchar putchar i32
 
