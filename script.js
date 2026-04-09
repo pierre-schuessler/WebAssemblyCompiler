@@ -564,11 +564,23 @@ function print(html) {
   termOutput.scrollTop = termOutput.scrollHeight;
 }
 
-function appendToPrint(html) {
-  const last = termOutput.lastElementChild;
-  if (last) {
-    last.innerHTML += html;
-  }
+function appendToPrint(text) {
+  const parts = text.split("\n");
+
+  parts.forEach((part, index) => {
+    if (index === 0) {
+      // append to current line
+      const last = termOutput.lastElementChild;
+      if (last) {
+        last.innerHTML += part;
+      } else {
+        print(part);
+      }
+    } else {
+      // create new line for each \n
+      print(part);
+    }
+  });
 }
 
 console.stdout = appendToPrint;
