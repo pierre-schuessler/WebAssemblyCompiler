@@ -618,7 +618,7 @@ async function runCommand(raw, isInternal = false) {
     verb = parts[0].toLowerCase();
 
   if (verb === "help") {
-    print(`<span class="c-muted">  build         — compile only</span>`);
+    print(`<span class="c-muted">  compile         — compile only</span>`);
     print(`<span class="c-muted">  run fn [args] — call exported function</span>`);
     print(`<span class="c-muted">  make [args]   — compile &amp; test exports with given args (padded with 0s)</span>`);
     print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
@@ -629,7 +629,7 @@ async function runCommand(raw, isInternal = false) {
     termOutput.innerHTML = "";
   }
 
-  else if (verb === "build") {
+  else if (verb === "compile") {
     const code = document.getElementById("code").value;
     if (!code.trim()) {
       print(`<span class="c-err">editor is empty</span>`);
@@ -671,7 +671,7 @@ async function runCommand(raw, isInternal = false) {
   }
 
   else if (verb === "make") {
-    await runCommand("build", true);
+    await runCommand("compile", true);
     print("");
 
     if (!lastInstance) return;
