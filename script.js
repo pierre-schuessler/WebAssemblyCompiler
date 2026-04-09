@@ -11,6 +11,9 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
   const saved = localStorage.getItem(storageKey);
   if (saved) panel.style.width = saved + "px";
 
+  // Sync handle visibility with initial panel state
+  handle.classList.toggle("hidden-handle", panel.classList.contains("collapsed"));
+
   handle.addEventListener("mousedown", (e) => {
     if (panel.classList.contains("collapsed")) return;
     dragging = true;
@@ -54,6 +57,7 @@ function toggleDocsPanel() {
   const btn = document.getElementById("activityDocs");
   const open = panel.classList.toggle("collapsed") === false;
   btn.classList.toggle("active", open);
+  document.getElementById("resizeDocs").classList.toggle("hidden-handle", !open);
   if (open) showDocsList();
 }
 
@@ -226,9 +230,10 @@ function toggleProgPanel() {
   const btn = document.getElementById("activityProg");
   const collapsed = panel.classList.toggle("collapsed");
   btn.classList.toggle("active", !collapsed);
+  document.getElementById("resizeProg").classList.toggle("hidden-handle", collapsed);
   if (!collapsed) {
     renderProgList();
-    
+
     if (!progPanelInited && PROG_FILES.length > 0) {
       progPanelInited = true;
       //loadAdminProg(PROG_FILES[0]);
@@ -297,7 +302,7 @@ async function loadAdminProg(name) {
     document.getElementById("code").value = progsCache[name];
     updateLineNumbers();
     print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(name)}</span>`);
-    
+
     return;
   }
 
@@ -312,10 +317,10 @@ async function loadAdminProg(name) {
       updateLineNumbers();
     }
     print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(name)}</span>`);
-    
+
   } catch (err) {
     print(`<span class="c-err">✗ failed to load ${esc(name)}: ${esc(err.message)}</span>`);
-    
+
   }
 }
 
@@ -399,6 +404,7 @@ function toggleEnvPanel() {
   const btn = document.getElementById("activityEnv");
   const collapsed = panel.classList.toggle("collapsed");
   btn.classList.toggle("active", !collapsed);
+  document.getElementById("resizeEnv").classList.toggle("hidden-handle", collapsed);
 }
 
 function renderEnvList() {
@@ -721,10 +727,6 @@ async function runCommand(raw, isInternal = false) {
     let row = "";
     for (let i = 0; i < lastBinary.length; i++) {
       row += lastBinary[i].toString(16).padStart(2, "0").toUpperCase() + " ";
-      if ((i + 1) % 16 === 0) {
-        print(`<span class="c-hex">${row}</span>`);
-        row = "";
-      }
     }
     if (row) print(`<span class="c-hex">${row}</span>`);
   }
