@@ -620,7 +620,8 @@ async function runCommand(raw, isInternal = false) {
   if (verb === "help") {
     print(`<span class="c-muted">  compile         — compile only</span>`);
     print(`<span class="c-muted">  run fn [args] — call exported function</span>`);
-    print(`<span class="c-muted">  make [args]   — compile &amp; test exports with given args (padded with 0s)</span>`);
+    print(`<span class="c-muted">  make [args]   — compile &amp; test exports with given args</span>`);
+    print(`<span class="c-muted">  make [args]   — compile &amp; run "main" with given args</span>`);
     print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
     print(`<span class="c-muted">  clear         — clear terminal</span>`);
   }
@@ -721,6 +722,30 @@ async function runCommand(raw, isInternal = false) {
     }
   }
 
+  else if (verb === "boot") {
+    await runCommand("compile", true);
+    print("");
+
+    if (!lastInstance) return;
+
+    const supplied = parts.slice(1).map(Number);
+
+    const fn = "main";
+
+    if (typeof lastInstance.exports[fn] !== "function") {
+      print(`No "${fn}" function found`);
+      return;
+    }
+
+    const needed = lastMeta[fn] ?? supplied.length;
+    const testArgs = Array.from({ length: needed }, (_, i) =>
+      i < supplied.length ? supplied[i] : 0,
+    );
+
+    await runCommand(`run ${fn} ${testArgs.join(" ")}`, true);
+  }
+  
+
   else if (verb === "test") {
     let args = parts.slice(1);
     print(test(...args));
@@ -737,6 +762,7 @@ async function runCommand(raw, isInternal = false) {
     }
     if (row) print(`<span class="c-hex">${row}</span>`);
   }
+
 
   else {
     print(`<span class="c-err">✗ unknown command: ${esc(verb)}</span>`);
