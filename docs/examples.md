@@ -97,7 +97,7 @@ Imports are declared at the top. They are called by their local alias. If the im
 
 ```
 memory 1
-data 0 "Hello, world!\0"
+data 0 "Hello, world!\n\0"
 
 import env.putchar putchar i32
 

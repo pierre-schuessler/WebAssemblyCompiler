@@ -7,15 +7,15 @@ export printString i32 startNode
   loop empty()
     // 1. Load the byte from memory
     char = load8_u(startNode)
-    
-    // 2. Call putchar immediately (sends the char, or 0, to JS)
-    putchar(char)
-    
-    // 3. Check if that character was the null terminator
+
+     // 2. Check if that character is the null terminator
     isEnd = eqz(char)
     if empty(isEnd)
       return()
     end()
+    
+    // 3. Call putchar immediately (sends the char, or 0, to JS)
+    putchar(char)
 
     // 4. Increment pointer and jump back to start of loop
     startNode = add(startNode, "1")

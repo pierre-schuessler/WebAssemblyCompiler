@@ -391,7 +391,7 @@ let envImports = [
   },
   { name: "log", sig: "i32 => i32", body: "console.log(a); return a;" },
   { name: "putchar", sig: "i32", body: `
-      if (a === 0) {
+      if (a === 10) {
         console.stdout(window.message);
         window.message = "";
         return;
