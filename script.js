@@ -47,7 +47,10 @@ makeResizable("resizeProg", "progPanel", 140, 520, "wasm-prog-panel-w");
 
 // ─── Docs Panel ───────────────────────────────────────────────────────────────
 
-const DOC_FILES = ["language.md", "examples.md"];
+const DOC_FILES = ["language.md"];
+const DISPLAY_NAMES = {
+  "language.md": "Language reference"
+};
 
 const docsCache = {};
 let currentDoc = null;
@@ -72,13 +75,15 @@ function showDocsList() {
 
 function renderDocsList() {
   const list = document.getElementById("docsFileList");
-  list.innerHTML = DOC_FILES.map(
-    (name) => `
-        <div class="docs-file-item${currentDoc === name ? " active" : ""}" data-doc="${esc(name)}">
-            <span class="docs-file-icon">▸</span>
-            <span class="docs-file-name">${esc(name)}</span>
-        </div>`,
-  ).join("");
+  list.innerHTML = DOC_FILES.map((name) => {
+    const displayName = DISPLAY_NAMES[name] || name; // fallback to name if not found
+
+    return `
+      <div class="docs-file-item${currentDoc === name ? " active" : ""}" data-doc="${esc(name)}">
+          <span class="docs-file-icon">▸</span>
+          <span class="docs-file-name">${esc(displayName)}</span>
+      </div>`;
+  }).join("");
 
   list.querySelectorAll(".docs-file-item").forEach((el) => {
     el.addEventListener("click", () => openDoc(el.dataset.doc));
@@ -216,6 +221,10 @@ function renderMarkdown(md) {
 // Admin-approved programs loaded from /programs/ — edit this list to match your files.
 // The first entry is opened by default when the panel is first opened.
 const PROG_FILES = ["basics", "hello_world"];
+const PROG_DISPLAY_NAMES = {
+  "basics": "Basic syntax demo",
+  "hello_world": "Hello, World!"
+};
 
 const progsCache = {};
 let userProgs = [];
@@ -249,9 +258,11 @@ function renderProgList() {
     html += `<div class="prog-section-label">Official programs</div>`;
     html += PROG_FILES.map((name) => {
       const active = activeProg && !activeProg.isUser && activeProg.name === name;
+      const displayName = PROG_DISPLAY_NAMES[name] || name; // ← key change
+
       return `<div class="prog-file-item prog-admin${active ? " active" : ""}" data-name="${esc(name)}" data-user="0">
         <span class="prog-file-icon">★</span>
-        <span class="prog-file-name">${esc(name)}</span>
+        <span class="prog-file-name">${esc(displayName)}</span>
       </div>`;
     }).join("");
   }
