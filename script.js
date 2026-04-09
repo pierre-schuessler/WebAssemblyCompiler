@@ -574,7 +574,14 @@ function print(html) {
   termOutput.scrollTop = termOutput.scrollHeight;
 }
 
-console.stdout = print;
+function appendToPrint(html) {
+  const last = termOutput.lastElementChild;
+  if (last) {
+    last.innerHTML += html;
+  }
+}
+
+console.stdout = appendToPrint;
 
 print(`<span class="c-info">WASM Compiler ready.</span>`);
 print(
