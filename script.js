@@ -216,15 +216,27 @@ function renderMarkdown(md) {
   return md;
 }
 
-
 // ─── Programs Panel ───────────────────────────────────────────────────────────
-// Admin-approved programs loaded from /programs/ — edit this list to match your files.
-// The first entry is opened by default when the panel is first opened.
-const PROG_FILES = ["basics", "hello_world"];
-const PROG_DISPLAY_NAMES = {
-  "basics": "Basic syntax demo",
-  "hello_world": "Hello, World!"
-};
+// Group admin programs into labeled sections.
+// Each section has a `label` (shown as a divider) and `files` (id → display name).
+// Programs appear in exactly the order listed here.
+const PROG_SECTIONS = [
+  {
+    label: "Getting Started",
+    files: [
+      { id: "basics",      name: "Basic syntax demo" },
+      { id: "hello_world", name: "Hello, World!" },
+    ]
+  },
+  //
+  // {
+  //   label: "Advanced",
+  //   files: [
+  //     { id: "loops",  name: "Loop examples" },
+  //     { id: "memory", name: "Memory ops" },
+  //   ]
+  // },
+];
 
 const progsCache = {};
 let userProgs = [];
@@ -242,10 +254,9 @@ function toggleProgPanel() {
   document.getElementById("resizeProg").classList.toggle("hidden-handle", collapsed);
   if (!collapsed) {
     renderProgList();
-
-    if (!progPanelInited && PROG_FILES.length > 0) {
+    if (!progPanelInited && PROG_SECTIONS.some(s => s.files.length > 0)) {
       progPanelInited = true;
-      //loadAdminProg(PROG_FILES[0]);
+      //loadAdminProg(PROG_SECTIONS[0].files[0].id);
     }
   }
 }
@@ -254,17 +265,16 @@ function renderProgList() {
   const list = document.getElementById("progFileList");
   let html = "";
 
-  if (PROG_FILES.length > 0) {
-    html += `<div class="prog-section-label">Official programs</div>`;
-    html += PROG_FILES.map((name) => {
-      const active = activeProg && !activeProg.isUser && activeProg.name === name;
-      const displayName = PROG_DISPLAY_NAMES[name] || name; // ← key change
-
-      return `<div class="prog-file-item prog-admin${active ? " active" : ""}" data-name="${esc(name)}" data-user="0">
+  for (const section of PROG_SECTIONS) {
+    if (!section.files.length) continue;
+    html += `<div class="prog-section-label">${esc(section.label)}</div>`;
+    for (const file of section.files) {
+      const active = activeProg && !activeProg.isUser && activeProg.name === file.id;
+      html += `<div class="prog-file-item prog-admin${active ? " active" : ""}" data-name="${esc(file.id)}" data-user="0">
         <span class="prog-file-icon">★</span>
-        <span class="prog-file-name">${esc(displayName)}</span>
+        <span class="prog-file-name">${esc(file.name)}</span>
       </div>`;
-    }).join("");
+    }
   }
 
   if (userProgs.length > 0) {
@@ -279,7 +289,8 @@ function renderProgList() {
     }).join("");
   }
 
-  if (!PROG_FILES.length && !userProgs.length) {
+  const totalAdminFiles = PROG_SECTIONS.reduce((n, s) => n + s.files.length, 0);
+  if (!totalAdminFiles && !userProgs.length) {
     html = `<div class="env-empty">No programs yet.<br>Click + to create one.</div>`;
   }
 
@@ -304,34 +315,41 @@ function renderProgList() {
   });
 }
 
-async function loadAdminProg(name) {
+function findAdminFile(id) {
+  for (const section of PROG_SECTIONS) {
+    const file = section.files.find(f => f.id === id);
+    if (file) return file;
+  }
+  return null;
+}
+
+async function loadAdminProg(id) {
   autoSaveCurrentProg();
-  activeProg = { name, isUser: false };
+  activeProg = { name: id, isUser: false };
   renderProgList();
 
-  if (typeof progsCache[name] === "string") {
-    document.getElementById("code").value = progsCache[name];
+  if (typeof progsCache[id] === "string") {
+    document.getElementById("code").value = progsCache[id];
     updateLineNumbers();
-    print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(name)}</span>`);
-
+    const file = findAdminFile(id);
+    print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(file ? file.name : id)}</span>`);
     return;
   }
 
-  print(`<span class="c-muted">loading ${esc(name)}…</span>`);
+  print(`<span class="c-muted">loading…</span>`);
   try {
-    const res = await fetch(`programs/${name}`);
+    const res = await fetch(`programs/${id}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`);
     const text = await res.text();
-    progsCache[name] = text;
-    if (activeProg && activeProg.name === name && !activeProg.isUser) {
+    progsCache[id] = text;
+    if (activeProg && activeProg.name === id && !activeProg.isUser) {
       document.getElementById("code").value = text;
       updateLineNumbers();
     }
-    print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(name)}</span>`);
-
+    const file = findAdminFile(id);
+    print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(file ? file.name : id)}</span>`);
   } catch (err) {
-    print(`<span class="c-err">✗ failed to load ${esc(name)}: ${esc(err.message)}</span>`);
-
+    print(`<span class="c-err">✗ failed to load ${esc(id)}: ${esc(err.message)}</span>`);
   }
 }
 
