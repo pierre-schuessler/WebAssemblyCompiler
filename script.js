@@ -222,6 +222,14 @@ const PROG_SECTIONS = [
       { id: "hello_world", name: "Hello, World!" },
     ]
   },
+  {
+    label: "Simple programs",
+    files: [
+      { id: "print_types",    name: "Printing different types" },
+      { id: "fibonacci",      name: "Fibonacci" },
+      
+    ]
+  },
 ];
 
 const progsCache = {};

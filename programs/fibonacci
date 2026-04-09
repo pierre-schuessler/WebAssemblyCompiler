@@ -1,0 +1,65 @@
+memory 1
+data 0 "String to print\0"
+
+import env.putchar putchar i32
+
+export printString i32 ptr
+  loop empty()
+    char = load8_u(ptr)
+    isEnd = eqz(char)
+    if empty(isEnd)
+      return()
+    end empty()
+    
+    putchar(char)
+    ptr = add(ptr, "1")
+    br 0()
+  end empty()
+
+export printInt i32 n
+  cond = gt_u(n, "9")
+  if empty(cond)
+    next_n = div_u(n, "10")
+    printInt(next_n)
+  end empty()
+  
+  digit = rem_u(n, "10")
+  char = add(digit, "48")
+  putchar(char)
+
+export fib i32 n => i32
+  a = "0"
+  b = "1"
+  i = "0"
+  
+  block empty()
+    loop empty()
+      
+      cond = ge_s(i, n)
+      if empty(cond)
+        br 2()
+      end empty()
+      
+      
+      next_val = add(a, b)
+      
+      
+      a = b
+      b = next_val
+      
+      
+      i = add(i, "1")
+      br 0()
+    end empty()
+  end empty()
+  
+  return(a)
+
+export main i32 input => i32
+  
+  printString("0")
+  
+  ans = fib(input)
+  printInt(ans)
+  
+  return("0")

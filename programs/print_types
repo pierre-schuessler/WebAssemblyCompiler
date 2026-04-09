@@ -1,0 +1,24 @@
+export printString i32 ptr
+  loop empty()
+    char = load8_u(ptr)
+    isEnd = eqz(char)
+    if empty(isEnd)
+      return()
+    end empty()
+    
+    putchar(char)
+    ptr = add(ptr, "1")
+    br 0()
+  end empty()
+
+I
+export printInt i32 n
+  cond = gt_u(n, "9")
+  if empty(cond)
+    next_n = div_u(n, "10")
+    printInt(next_n)
+  end empty()
+  
+  digit = rem_u(n, "10")
+  char = add(digit, "48")
+  putchar(char)
