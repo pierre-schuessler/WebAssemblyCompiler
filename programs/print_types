@@ -14,7 +14,6 @@ export printString i32 ptr
     br 0()
   end empty()
 
-I
 export printInt i32 n
   cond = gt_u(n, "9")
   if empty(cond)
