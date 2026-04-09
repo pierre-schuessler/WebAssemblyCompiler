@@ -11,7 +11,6 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
   const saved = localStorage.getItem(storageKey);
   if (saved) panel.style.width = saved + "px";
 
-  // Sync handle visibility with initial panel state
   handle.classList.toggle("hidden-handle", panel.classList.contains("collapsed"));
 
   handle.addEventListener("mousedown", (e) => {
@@ -45,7 +44,6 @@ makeResizable("resizeDocs", "docsPanel", 140, 520, "wasm-docs-panel-w");
 makeResizable("resizeProg", "progPanel", 140, 520, "wasm-prog-panel-w");
 
 
-// ─── Docs Panel ───────────────────────────────────────────────────────────────
 
 const DOC_FILES = ["language.md"];
 const DISPLAY_NAMES = {
@@ -76,7 +74,7 @@ function showDocsList() {
 function renderDocsList() {
   const list = document.getElementById("docsFileList");
   list.innerHTML = DOC_FILES.map((name) => {
-    const displayName = DISPLAY_NAMES[name] || name; // fallback to name if not found
+    const displayName = DISPLAY_NAMES[name] || name;
 
     return `
       <div class="docs-file-item${currentDoc === name ? " active" : ""}" data-doc="${esc(name)}">
@@ -216,10 +214,6 @@ function renderMarkdown(md) {
   return md;
 }
 
-// ─── Programs Panel ───────────────────────────────────────────────────────────
-// Group admin programs into labeled sections.
-// Each section has a `label` (shown as a divider) and `files` (id → display name).
-// Programs appear in exactly the order listed here.
 const PROG_SECTIONS = [
   {
     label: "Getting Started",
@@ -228,22 +222,13 @@ const PROG_SECTIONS = [
       { id: "hello_world", name: "Hello, World!" },
     ]
   },
-  //
-  // {
-  //   label: "Advanced",
-  //   files: [
-  //     { id: "loops",  name: "Loop examples" },
-  //     { id: "memory", name: "Memory ops" },
-  //   ]
-  // },
 ];
 
 const progsCache = {};
 let userProgs = [];
 try { userProgs = JSON.parse(localStorage.getItem("wasm-user-progs") || "[]"); } catch {}
-// userProgs: [{name, code}]
 
-let activeProg = null; // {name, isUser, idx?}
+let activeProg = null;
 let progPanelInited = false;
 
 function toggleProgPanel() {
@@ -256,7 +241,6 @@ function toggleProgPanel() {
     renderProgList();
     if (!progPanelInited && PROG_SECTIONS.some(s => s.files.length > 0)) {
       progPanelInited = true;
-      //loadAdminProg(PROG_SECTIONS[0].files[0].id);
     }
   }
 }
@@ -415,7 +399,6 @@ function createNewProg() {
 }
 
 
-// ─── Env Panel ────────────────────────────────────────────────────────────────
 
 let envImports = [
   {
@@ -544,7 +527,6 @@ function buildEnvObject() {
 }
 
 
-// ─── Activity Bar Listeners ───────────────────────────────────────────────────
 
 document.getElementById("activityEnv").addEventListener("click", toggleEnvPanel);
 document.getElementById("activityDocs").addEventListener("click", toggleDocsPanel);
@@ -564,7 +546,6 @@ document.getElementById("progNewName").addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeProgNewForm();
 });
 
-// Auto-save user program when the editor content changes
 document.getElementById("code").addEventListener("input", () => {
   if (activeProg && activeProg.isUser) {
     userProgs[activeProg.idx].code = document.getElementById("code").value;
@@ -575,7 +556,6 @@ document.getElementById("code").addEventListener("input", () => {
 renderEnvList();
 
 
-// ─── Terminal ─────────────────────────────────────────────────────────────────
 
 const termOutput = document.getElementById("termOutput");
 const termInput = document.getElementById("termInput");
@@ -604,7 +584,6 @@ function appendToPrint(text) {
 
   parts.forEach((part, index) => {
     if (index === 0) {
-      // append to current line
       const last = termOutput.lastElementChild;
       if (last) {
         last.innerHTML += part;
@@ -612,7 +591,6 @@ function appendToPrint(text) {
         print(part);
       }
     } else {
-      // create new line for each \n
       print(part);
     }
   });
@@ -793,7 +771,6 @@ termInput.addEventListener("keydown", (e) => {
 document.getElementById("panel").addEventListener("click", () => termInput.focus());
 
 
-// ─── Editor: Line Numbers & Minimap ──────────────────────────────────────────
 
 const codeEl = document.getElementById("code");
 const lineNums = document.getElementById("lineNumbers");
