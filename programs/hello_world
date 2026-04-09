@@ -3,6 +3,10 @@ data 0 "Hello, world!\0"
 
 import env.putchar putchar i32
 
+export main => i32
+    printString("0")
+    return("0")
+
 export printString i32 startNode
   loop empty()
     // 1. Load the byte from memory
@@ -21,3 +25,5 @@ export printString i32 startNode
     startNode = add(startNode, "1")
     br 0()
   end()
+
+
