@@ -312,10 +312,10 @@ async function loadAdminProg(name) {
       updateLineNumbers();
     }
     print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(name)}</span>`);
-    print("");
+    
   } catch (err) {
     print(`<span class="c-err">✗ failed to load ${esc(name)}: ${esc(err.message)}</span>`);
-    print("");
+    
   }
 }
 
