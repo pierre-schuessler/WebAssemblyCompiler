@@ -262,7 +262,7 @@ function renderProgList() {
   }
 
   if (userProgs.length > 0) {
-    html += `<div class="prog-section-label">My Scripts</div>`;
+    html += `<div class="prog-section-label">My Programs</div>`;
     html += userProgs.map((p, i) => {
       const active = activeProg && activeProg.isUser && activeProg.idx === i;
       return `<div class="prog-file-item${active ? " active" : ""}" data-name="${esc(p.name)}" data-user="1" data-idx="${i}">
