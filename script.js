@@ -218,7 +218,7 @@ const PROG_SECTIONS = [
   {
     label: "Getting Started",
     files: [
-      { id: "basics",      name: "Basic syntax demo" },
+      { id: "basics",      name: "Basic syntax demonstration" },
       { id: "hello_world", name: "Hello, World!" },
     ]
   },
