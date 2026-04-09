@@ -297,7 +297,7 @@ async function loadAdminProg(name) {
     document.getElementById("code").value = progsCache[name];
     updateLineNumbers();
     print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(name)}</span>`);
-    print("");
+    
     return;
   }
 
