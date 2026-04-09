@@ -1,5 +1,5 @@
 memory 1
-data 0 "Hello, world!\n\0"
+data 0 "Hello, world!\0"
 
 import env.putchar putchar i32
 
