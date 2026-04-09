@@ -37,7 +37,8 @@ function encodeF64(v) {
 }
 
 function encodeWasmInstruction(words) {
-  let type = "i32";
+  let type = ["block", "loop", "if"].includes(words[0]) ? "empty" : "i32";
+  
   const validTypes = ["empty", "i32", "i64", "f32", "f64"];
   if (words.length > 1 && validTypes.includes(words[1])) {
     type = words[1];
