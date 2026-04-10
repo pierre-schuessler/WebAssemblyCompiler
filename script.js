@@ -225,9 +225,13 @@ const PROG_SECTIONS = [
   {
     label: "Simple programs",
     files: [
-      { id: "print_types",    name: "Printing different types" },
       { id: "fibonacci",      name: "Fibonacci" },
-      
+    ]
+  },
+  {
+    label: "Libraries",
+    files: [
+      { id: "print_types",    name: "Printing different types" },
     ]
   },
 ];
