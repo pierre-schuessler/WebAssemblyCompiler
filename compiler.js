@@ -681,7 +681,10 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
 
       output.push(`call ${fnIdx}`);
 
-      // Set in reverse order: last return value is on top of stack
+      // Drop uncaptured return values from the top of the stack first
+      const retTypes = callReturnMap[fnIdx] ?? [];
+      for (let i = vars.length; i < retTypes.length; i++) output.push('drop');
+      // Then set captured vars in reverse declaration order (last var = top of remaining stack)
       for (const { name } of [...vars].reverse()) {
         output.push(globalNames.has(name) ? `global.set ${name}` : `set $${name}`);
       }
@@ -729,12 +732,17 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       }
 
       if (opStr.startsWith('callfn ')) {
-        output.push(`call ${opStr.slice(7).trim()}`);
+        const fnIdx = parseInt(opStr.slice(7).trim(), 10);
+        output.push(`call ${fnIdx}`);
+        // Drop uncaptured return values from the top first
+        const retTypes = callReturnMap[fnIdx] ?? [];
+        for (let i = 1; i < retTypes.length; i++) output.push('drop');
+        // Set the captured variable (now on top = first return value)
+        output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       } else {
         output.push(opStr);
+        output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       }
-
-      output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       continue;
     }
 
