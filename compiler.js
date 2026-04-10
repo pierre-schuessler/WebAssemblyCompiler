@@ -162,6 +162,20 @@ function encodeWasmInstruction(words) {
 }
 
 const TYPEMAP = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
+
+function resolveIncludes(lines, libs = {}) {
+  const out = [];
+  for (const line of lines) {
+    const m = line.match(/^#include\s+<([^>]+)>$/);
+    if (!m) { out.push(line); continue; }
+    const name = m[1].trim();
+    if (!(name in libs)) throw new Error(`include <${name}>: not found`);
+    // Inline the library's lines in place of the #include
+    out.push(...libs[name].split("\n").map(l => l.replace(/\/\/.*$/, "").trim()).filter(Boolean));
+  }
+  return out;
+}
+
 function flatten(line) {
   let output = [];
   let tempIndex = 0;
@@ -655,11 +669,13 @@ function artificialize(lines) {
   return result;
 }
 
-function preprocess(code) {
+function preprocess(code, libs = {}) {
   let lines = code
     .split("\n")
     .map((l) => l.replace(/\/\/.*$/, "").trim())
     .filter((l) => l.length > 0);
+
+  lines = resolveIncludes(lines, libs);
 
   let temp = [];
   lines.forEach((line) => {
@@ -684,7 +700,7 @@ function preprocess(code) {
   return lines;
 }
 
-export function compile(code) {
+export function compile(code, libs = {}) {
 
   const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
   let types       = [],
@@ -716,7 +732,7 @@ export function compile(code) {
     }
   }
 
-  const lines = preprocess(code);
+  const lines = preprocess(code, libs);
   if (!lines.length) console.warn("[WebAssemblyCompiler] Compiler was called without any code.");
 
   for (const line of lines) {

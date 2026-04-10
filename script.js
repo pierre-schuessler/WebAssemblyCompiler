@@ -603,6 +603,30 @@ function appendToPrint(text) {
     }
   });
 }
+async function gatherLibs(code) {
+  const libs = {};
+  for (const line of code.split("\n")) {
+    const m = line.match(/^\s*#include\s+<([^>]+)>\s*$/);
+    if (!m) continue;
+    const name = m[1].trim();
+    if (name in libs) continue;
+
+    const userProg = userProgs.find(p => p.name === name);
+    if (userProg) {
+      libs[name] = userProg.code;
+    } else if (findAdminFile(name)) {
+      if (typeof progsCache[name] !== "string") {
+        const res = await fetch(`programs/${name}`);
+        if (!res.ok) throw new Error(`include <${name}>: HTTP ${res.status}`);
+        progsCache[name] = await res.text();
+      }
+      libs[name] = progsCache[name];
+    } else {
+      throw new Error(`include <${name}>: not found`);
+    }
+  }
+  return libs;
+}
 
 console.stdout = appendToPrint;
 
@@ -648,7 +672,8 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-muted">compiling…</span>`);
 
     try {
-      const binary = compile(code);
+      const libs = await gatherLibs(code);
+      const binary = compile(code, libs);
       if (!binary) throw new Error("compile() returned null");
 
       lastBinary = binary;
