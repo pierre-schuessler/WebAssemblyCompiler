@@ -291,6 +291,18 @@ function inferWasmTypes(lines) {
 
   const CMP_OPS = /^(eqz|eq|ne|lt_s|lt_u|gt_s|gt_u|le_s|le_u|ge_s|ge_u)(\s|$)/;
 
+  const CONV_RESULT = {
+    'i32.wrap': 'i32', 'i32.trunc_s_f32': 'i32', 'i32.trunc_u_f32': 'i32',
+    'i32.trunc_s_f64': 'i32', 'i32.trunc_u_f64': 'i32', 'i32.reinterpret': 'i32',
+    'i64.extend_s': 'i64', 'i64.extend_u': 'i64', 'i64.trunc_s_f32': 'i64',
+    'i64.trunc_u_f32': 'i64', 'i64.trunc_s_f64': 'i64', 'i64.trunc_u_f64': 'i64',
+    'i64.reinterpret': 'i64',
+    'f32.convert_s_i32': 'f32', 'f32.convert_u_i32': 'f32', 'f32.convert_s_i64': 'f32',
+    'f32.convert_u_i64': 'f32', 'f32.demote': 'f32', 'f32.reinterpret': 'f32',
+    'f64.convert_s_i32': 'f64', 'f64.convert_u_i32': 'f64', 'f64.convert_s_i64': 'f64',
+    'f64.convert_u_i64': 'f64', 'f64.promote': 'f64', 'f64.reinterpret': 'f64',
+  };
+
   typeMap = { ...globalTypeMap };
 
   return lines.map(line => {
@@ -332,12 +344,12 @@ function inferWasmTypes(lines) {
         .map(m => typeMap[m[1]])
         .find(tp => tp !== undefined);
 
-      const resultType = isCmp ? 'i32' : operandType;
+      const resultType = CONV_RESULT[operation] ?? (isCmp ? 'i32' : operandType);
 
       if (!resultType) return line;
       typeMap[varName] = resultType;
 
-      const opType = isCmp ? (operandType ?? resultType) : resultType;
+      const opType = isCmp ? (operandType ?? resultType) : (CONV_RESULT[operation] ? operandType : resultType);
       return `${indent}${resultType} ${varName} = ${operation} ${opType}(${argsStr})`;
     }
 
