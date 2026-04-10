@@ -393,6 +393,7 @@ function registerFunctions(lines) {
           arity:      inputs.length,
           inputTypes: inputs,
           output:     outputs[0] ?? null,
+          outputs,
           index:      importCount,
         };
       }
@@ -427,6 +428,7 @@ function registerFunctions(lines) {
         inputTypes: inputs,
         argTypes,
         output:     outputs[0] ?? null,
+        outputs,
         index:      importCount + exportCount,
       };
       exportCount++;
@@ -519,6 +521,21 @@ function inferWasmTypes(lines, registry = {}) {
       return `${indent}${inferredType} ${varName} = ${rawVal}`;
     }
 
+    // Multi-var call: "a, b = func(args)" — requires a comma in the LHS
+    const multiCallM = t.match(/^(\w+(?:\s+\w+)?(?:,\s*\w+(?:\s+\w+)?)+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
+    if (multiCallM) {
+      const [, lhsStr, operation, argsStr] = multiCallM;
+      const entry = registry[operation];
+      if (entry?.index !== undefined) {
+        const varParts = lhsStr.split(',').map(s => s.trim().split(/\s+/));
+        const varNames = varParts.map(p => p[p.length - 1]);
+        const outTypes = entry.outputs ?? [];
+        varNames.forEach((v, i) => { if (outTypes[i]) typeMap[v] = outTypes[i]; });
+        const typedLhs = varNames.map((v, i) => `${outTypes[i] ?? 'i32'} ${v}`).join(', ');
+        return `${indent}${typedLhs} = callfn ${entry.index}(${argsStr})`;
+      }
+    }
+
     const callM = t.match(/^(\w+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
     if (callM) {
       const [, varName, operation, argsStr] = callM;
@@ -547,7 +564,7 @@ function inferWasmTypes(lines, registry = {}) {
   });
 }
 
-function evaluate(lines) {
+function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
   const output = [];
   const globalNames = new Set();
   let exportIdx = -1;
@@ -627,6 +644,50 @@ function evaluate(lines) {
       continue;
     }
 
+    // Multi-var call: "type0 a, type1 b = callfn N(args)"
+    const multiVarCallM = t.match(/^((?:\w+\s+\w+)(?:,\s*(?:\w+\s+\w+))*)\s*=\s*callfn\s+(\d+)\((.*)\)$/);
+    if (multiVarCallM) {
+      const [, lhsStr, fnIdxStr, argsStr] = multiVarCallM;
+      const fnIdx = parseInt(fnIdxStr, 10);
+      const vars = lhsStr.split(',').map(s => {
+        const [type, name] = s.trim().split(/\s+/);
+        return { type, name };
+      });
+
+      // Declare new locals (in order)
+      for (const { type, name } of vars) {
+        if (!globalNames.has(name) && !knownLocals.has(name)) {
+          knownLocals.add(name);
+          output.splice(exportIdx + 1, 0, `local ${type} ${name}`);
+          exportIdx++;
+        }
+      }
+
+      // Push args
+      const inputTypes = callInputMap[fnIdx] ?? [];
+      const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
+      args.forEach((arg, argIdx) => {
+        if (arg.startsWith('"') || arg.startsWith('64"')) {
+          const argIs64  = arg.startsWith('64"');
+          const val      = arg.replace(/^(?:64)?"|"$/g, '');
+          const constType = inputTypes[argIdx]
+            ?? (val.includes('.') || /[eE]/.test(val) ? 'f' : 'i') + (argIs64 ? '64' : '32');
+          output.push(`const ${constType} ${val}`);
+        } else {
+          const name = arg.slice(1);
+          output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
+        }
+      });
+
+      output.push(`call ${fnIdx}`);
+
+      // Set in reverse order: last return value is on top of stack
+      for (const { name } of [...vars].reverse()) {
+        output.push(globalNames.has(name) ? `global.set ${name}` : `set $${name}`);
+      }
+      continue;
+    }
+
     const callM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*([^(]+)\((.*)\)$/);
     if (callM) {
       const [, maybeType, dest, rawOp, argsStr] = callM;
@@ -703,7 +764,11 @@ function evaluate(lines) {
       }
 
       if (opStr.startsWith('callfn ')) {
-        output.push(`call ${opStr.slice(7).trim()}`);
+        const fnIdx = parseInt(opStr.slice(7).trim(), 10);
+        output.push(`call ${fnIdx}`);
+        // Drop any uncaught return values to keep the stack clean
+        const retTypes = callReturnMap[fnIdx] ?? [];
+        for (let i = 0; i < retTypes.length; i++) output.push('drop');
       } else {
         output.push(opStr);
       }
@@ -903,10 +968,20 @@ function preprocess(code, libs = {}) {
   let functionRegistry = registerFunctions(lines);
   console.log("function registry: ", functionRegistry);
 
+  // Build call-site maps from registry for use in evaluate()
+  const callReturnMap = {}; // fnIndex -> array of return types
+  const callInputMap  = {}; // fnIndex -> array of input types
+  for (const entry of Object.values(functionRegistry)) {
+    if (entry.index !== undefined) {
+      callReturnMap[entry.index] = entry.outputs ?? (entry.output ? [entry.output] : []);
+      callInputMap[entry.index]  = entry.inputTypes ?? [];
+    }
+  }
+
   lines = inferWasmTypes(lines, functionRegistry);
   console.log("after inferWasmTypes:", lines);
 
-  lines = evaluate(lines);
+  lines = evaluate(lines, callReturnMap, callInputMap);
   console.log("after evaluate:", lines);
 
   lines = artificialize(lines);
