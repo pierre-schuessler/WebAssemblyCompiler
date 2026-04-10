@@ -243,120 +243,347 @@ function flatten(line) {
   return output;
 }
 
-function inferWasmTypes(lines) {
-  const globalTypeMap = {};
-  let   typeMap       = {};
-  const funcRegistry  = {};
-  const validTypes    = new Set(["i32", "i64", "f32", "f64"]);
-  let importCount = 0, exportCount = 0;
+function registerFunctions(lines) {
+  const registry = {
+
+    // ── Variable access ──────────────────────────────────────────
+    "get":        { arity: 1, output: "local"  },
+    "set":        { arity: 1, output: null      },
+    "tee":        { arity: 1, output: "local"  },
+    "global.get": { arity: 1, output: "global" },
+    "global.set": { arity: 1, output: null      },
+
+    // ── Constants ────────────────────────────────────────────────
+    // output type is determined by the type prefix (i32/i64/f32/f64)
+    "const": { arity: 0, output: "typed" },
+
+    // ── Binary arithmetic (same type in → same type out) ─────────
+    "add":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "same" },
+    "sub":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "same" },
+    "mul":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "same" },
+    "div":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "same" },
+    "div_s": { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "div_u": { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "rem_s": { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "rem_u": { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "and":   { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "or":    { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "xor":   { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "shl":   { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "shr_s": { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "shr_u": { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "rotl":  { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+    "rotr":  { arity: 2, validTypes: ["i32","i64"],             output: "same" },
+
+    // ── Unary integer bit-ops ─────────────────────────────────────
+    "clz":    { arity: 1, validTypes: ["i32","i64"], output: "same" },
+    "ctz":    { arity: 1, validTypes: ["i32","i64"], output: "same" },
+    "popcnt": { arity: 1, validTypes: ["i32","i64"], output: "same" },
+
+    // ── Unary float ops ───────────────────────────────────────────
+    "abs":     { arity: 1, validTypes: ["f32","f64"], output: "same" },
+    "neg":     { arity: 1, validTypes: ["f32","f64"], output: "same" },
+    "ceil":    { arity: 1, validTypes: ["f32","f64"], output: "same" },
+    "floor":   { arity: 1, validTypes: ["f32","f64"], output: "same" },
+    "trunc":   { arity: 1, validTypes: ["f32","f64"], output: "same" },
+    "nearest": { arity: 1, validTypes: ["f32","f64"], output: "same" },
+    "sqrt":    { arity: 1, validTypes: ["f32","f64"], output: "same" },
+
+    // ── Binary float ops ──────────────────────────────────────────
+    "min":      { arity: 2, validTypes: ["f32","f64"], output: "same" },
+    "max":      { arity: 2, validTypes: ["f32","f64"], output: "same" },
+    "copysign": { arity: 2, validTypes: ["f32","f64"], output: "same" },
+
+    // ── Comparisons (always produce i32) ─────────────────────────
+    "eqz":  { arity: 1, validTypes: ["i32","i64"],             output: "i32" },
+    "eq":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "i32" },
+    "ne":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "i32" },
+    "lt_s": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
+    "lt_u": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
+    "lt":   { arity: 2, validTypes: ["f32","f64"],             output: "i32" },
+    "gt_s": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
+    "gt_u": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
+    "gt":   { arity: 2, validTypes: ["f32","f64"],             output: "i32" },
+    "le_s": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
+    "le_u": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
+    "le":   { arity: 2, validTypes: ["f32","f64"],             output: "i32" },
+    "ge_s": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
+    "ge_u": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
+    "ge":   { arity: 2, validTypes: ["f32","f64"],             output: "i32" },
+
+    // ── Type conversions (fixed input → fixed output) ─────────────
+    "i32.wrap":          { arity: 1, inputType: "i64", output: "i32" },
+    "i32.trunc_s_f32":   { arity: 1, inputType: "f32", output: "i32" },
+    "i32.trunc_u_f32":   { arity: 1, inputType: "f32", output: "i32" },
+    "i32.trunc_s_f64":   { arity: 1, inputType: "f64", output: "i32" },
+    "i32.trunc_u_f64":   { arity: 1, inputType: "f64", output: "i32" },
+    "i32.reinterpret":   { arity: 1, inputType: "f32", output: "i32" },
+
+    "i64.extend_s":      { arity: 1, inputType: "i32", output: "i64" },
+    "i64.extend_u":      { arity: 1, inputType: "i32", output: "i64" },
+    "i64.trunc_s_f32":   { arity: 1, inputType: "f32", output: "i64" },
+    "i64.trunc_u_f32":   { arity: 1, inputType: "f32", output: "i64" },
+    "i64.trunc_s_f64":   { arity: 1, inputType: "f64", output: "i64" },
+    "i64.trunc_u_f64":   { arity: 1, inputType: "f64", output: "i64" },
+    "i64.reinterpret":   { arity: 1, inputType: "f64", output: "i64" },
+
+    "f32.convert_s_i32": { arity: 1, inputType: "i32", output: "f32" },
+    "f32.convert_u_i32": { arity: 1, inputType: "i32", output: "f32" },
+    "f32.convert_s_i64": { arity: 1, inputType: "i64", output: "f32" },
+    "f32.convert_u_i64": { arity: 1, inputType: "i64", output: "f32" },
+    "f32.demote":        { arity: 1, inputType: "f64", output: "f32" },
+    "f32.reinterpret":   { arity: 1, inputType: "i32", output: "f32" },
+
+    "f64.convert_s_i32": { arity: 1, inputType: "i32", output: "f64" },
+    "f64.convert_u_i32": { arity: 1, inputType: "i32", output: "f64" },
+    "f64.convert_s_i64": { arity: 1, inputType: "i64", output: "f64" },
+    "f64.convert_u_i64": { arity: 1, inputType: "i64", output: "f64" },
+    "f64.promote":       { arity: 1, inputType: "f32", output: "f64" },
+    "f64.reinterpret":   { arity: 1, inputType: "i64", output: "f64" },
+
+    // ── Memory loads (output type = type prefix) ──────────────────
+    "load":     { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "typed" },
+    "load8_s":  { arity: 2, validTypes: ["i32","i64"],             output: "typed" },
+    "load8_u":  { arity: 2, validTypes: ["i32","i64"],             output: "typed" },
+    "load16_s": { arity: 2, validTypes: ["i32","i64"],             output: "typed" },
+    "load16_u": { arity: 2, validTypes: ["i32","i64"],             output: "typed" },
+    "load32_s": { arity: 2, validTypes: ["i64"],                   output: "typed" },
+    "load32_u": { arity: 2, validTypes: ["i64"],                   output: "typed" },
+
+    // ── Memory stores (no output) ─────────────────────────────────
+    "store":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: null },
+    "store8":  { arity: 2, validTypes: ["i32","i64"],             output: null },
+    "store16": { arity: 2, validTypes: ["i32","i64"],             output: null },
+    "store32": { arity: 2, validTypes: ["i64"],                   output: null },
+
+    // ── Memory misc ───────────────────────────────────────────────
+    "memory.size": { arity: 0, output: "i32" },
+    "memory.grow": { arity: 1, validTypes: ["i32"], output: "i32" },
+
+    // ── Calls (output depends on target function signature) ───────
+    "call":          { arity: -1, output: "fn" },
+    "call_indirect": { arity: -1, output: "fn" },
+
+    // ── Control flow ─────────────────────────────────────────────
+    "nop":         { arity: 0,  output: null   },
+    "unreachable": { arity: 0,  output: null   },
+    "return":      { arity: 0,  output: null   },
+    "drop":        { arity: 1,  output: null   },
+    "select":      { arity: 3,  output: "same" }, // [T, T, i32] → T
+    "block":       { arity: 0,  output: null   },
+    "loop":        { arity: 0,  output: null   },
+    "if":          { arity: 1,  output: null   },
+    "else":        { arity: 0,  output: null   },
+    "end":         { arity: 0,  output: null   },
+    "br":          { arity: 0,  output: null   },
+    "br_if":       { arity: 1,  output: null   },
+    "br_table":    { arity: -1, output: null   },
+  };
+
+  // ── Parse user-defined imports and exports from source lines ────
+  const validTypes = new Set(["i32","i64","f32","f64"]);
+  let importCount = 0;
+  let exportCount = 0;
 
   for (const line of lines) {
     const t = line.trim();
 
-    const globalM = t.match(/^global\s+(?:mut\s+)?(\S+)\s+(\S+)/);
-    if (globalM) { globalTypeMap[globalM[2]] = globalM[1]; continue; }
-
-    if (t.startsWith('import ')) {
+    if (t.startsWith("import ")) {
       const tokens = t.slice(7).trim().split(/\s+/);
       let i = 1;
       let localName = null;
-      if (tokens[i] && !validTypes.has(tokens[i]) && tokens[i] !== '=>')
+      if (tokens[i] && !validTypes.has(tokens[i]) && tokens[i] !== "=>")
         localName = tokens[i++];
-      const arrow   = tokens.indexOf('=>');
-      const retType = (arrow !== -1 && tokens[arrow + 1]) ? tokens[arrow + 1] : null;
-      if (localName)
-        funcRegistry[localName] = { index: importCount, returnType: retType, argTypes: {} };
+
+      const inputs = [], outputs = [];
+      let mode = "inputs";
+      for (; i < tokens.length; i++) {
+        if (tokens[i] === "=>") { mode = "outputs"; continue; }
+        if (validTypes.has(tokens[i]))
+          (mode === "inputs" ? inputs : outputs).push(tokens[i]);
+      }
+
+      if (localName) {
+        registry[localName] = {
+          arity:      inputs.length,
+          inputTypes: inputs,
+          output:     outputs[0] ?? null,
+          index:      importCount,
+        };
+      }
       importCount++;
       continue;
     }
 
-    if (t.startsWith('export ')) {
-      const tokens   = t.slice(7).trim().split(/\s+/);
-      const funcName = tokens[0];
-      let i = 1;
-      const argTypes = {};
-      while (i < tokens.length && tokens[i] !== '=>') {
-        if (tokens[i + 1] && tokens[i + 1] !== '=>') { argTypes[tokens[i + 1]] = tokens[i]; i += 2; }
-        else i++;
+    if (t.startsWith("export ")) {
+      const tokens  = t.slice(7).trim().split(/\s+/);
+      const fnName  = tokens[0];
+      const inputs  = [], outputs = [], argTypes = {};
+      let mode = "inputs", i = 1;
+
+      while (i < tokens.length) {
+        if (tokens[i] === "=>") { mode = "outputs"; i++; continue; }
+        if (validTypes.has(tokens[i])) {
+          if (mode === "inputs") {
+            const typ = tokens[i];
+            inputs.push(typ);
+            if (tokens[i + 1] && !validTypes.has(tokens[i + 1]) && tokens[i + 1] !== "=>") {
+              argTypes[tokens[++i]] = typ;
+            }
+          } else {
+            outputs.push(tokens[i]);
+          }
+        }
+        i++;
       }
-      const arrow   = tokens.indexOf('=>');
-      const retType = (arrow !== -1 && tokens[arrow + 1]) ? tokens[arrow + 1] : null;
-      funcRegistry[funcName] = { index: importCount + exportCount, returnType: retType, argTypes };
+
+      registry[fnName] = {
+        arity:      inputs.length,
+        inputTypes: inputs,
+        argTypes,
+        output:     outputs[0] ?? null,
+        index:      importCount + exportCount,
+      };
       exportCount++;
     }
   }
 
-  const constType = (raw, is64) =>
-    (raw.includes('.') || /[eE]/.test(raw) ? 'f' : 'i') + (is64 ? '64' : '32');
+  return registry;
+}
 
-  const CMP_OPS = /^(eqz|eq|ne|lt_s|lt_u|gt_s|gt_u|le_s|le_u|ge_s|ge_u)(\s|$)/;
+function inferWasmTypes(lines, registry = {}) {
+  const globalTypeMap = {};
+  let   typeMap       = {};
+  const validTypes    = new Set(["i32", "i64", "f32", "f64"]);
 
-  const CONV_RESULT = {
-    'i32.wrap': 'i32', 'i32.trunc_s_f32': 'i32', 'i32.trunc_u_f32': 'i32',
-    'i32.trunc_s_f64': 'i32', 'i32.trunc_u_f64': 'i32', 'i32.reinterpret': 'i32',
-    'i64.extend_s': 'i64', 'i64.extend_u': 'i64', 'i64.trunc_s_f32': 'i64',
-    'i64.trunc_u_f32': 'i64', 'i64.trunc_s_f64': 'i64', 'i64.trunc_u_f64': 'i64',
-    'i64.reinterpret': 'i64',
-    'f32.convert_s_i32': 'f32', 'f32.convert_u_i32': 'f32', 'f32.convert_s_i64': 'f32',
-    'f32.convert_u_i64': 'f32', 'f32.demote': 'f32', 'f32.reinterpret': 'f32',
-    'f64.convert_s_i32': 'f64', 'f64.convert_u_i32': 'f64', 'f64.convert_s_i64': 'f64',
-    'f64.convert_u_i64': 'f64', 'f64.promote': 'f64', 'f64.reinterpret': 'f64',
-  };
+  // Build global type map (registry doesn't cover globals since they
+  // aren't functions — keep this one dedicated pass)
+  for (const line of lines) {
+    const t = line.trim();
+    const globalM = t.match(/^global\s+(?:mut\s+)?(\S+)\s+(\S+)/);
+    if (globalM) globalTypeMap[globalM[2]] = globalM[1];
+  }
 
   typeMap = { ...globalTypeMap };
 
+  // ── Helper: resolve result and operand annotation types ─────────
+  // Returns { resultType, opType } or null if the instruction
+  // produces no value (output: null) or is unresolvable.
+  function resolveTypes(operation, argsStr) {
+    const entry = registry[operation];
+
+    // Operand type: scan args left-to-right, take first known local type
+    const operandType = [...argsStr.matchAll(/\$(\w+)/g)]
+      .map(m => typeMap[m[1]])
+      .find(t => t !== undefined);
+
+    // ── User-defined function (import / export has .index) ────────
+    if (entry?.index !== undefined) {
+      const ret = entry.output;
+      const resultType = (ret && validTypes.has(ret)) ? ret : null;
+      return resultType ? { resultType, opType: null, isCall: true, index: entry.index } : null;
+    }
+
+    // ── Built-in instruction ──────────────────────────────────────
+    if (!entry) {
+      // Unknown token — best-effort passthrough
+      const resultType = operandType ?? "i32";
+      return { resultType, opType: resultType, isCall: false };
+    }
+
+    const { output, inputType } = entry;
+
+    // Fixed output type (comparisons → i32, memory.size → i32, etc.)
+    if (validTypes.has(output)) {
+      // opType is what the instruction itself operates on:
+      //   - conversions supply an explicit inputType  (e.g. i64 for i32.wrap)
+      //   - comparisons need the operand type         (e.g. i32 for eq i32)
+      //   - memory.size / memory.grow carry no opType meaning
+      const opType = inputType ?? operandType ?? output;
+      return { resultType: output, opType, isCall: false };
+    }
+
+    // Same-type polymorphic (add, sub, clz, abs, select, …)
+    if (output === "same") {
+      const resultType = operandType ?? "i32";
+      return { resultType, opType: resultType, isCall: false };
+    }
+
+    // "typed" — result type is the type prefix on the instruction
+    // (memory loads: i32 load, f64 load, …).  We can only infer it
+    // from context; the address arg is always i32 so we can't derive
+    // the value type from it.  Fall back to i32 when unknown.
+    if (output === "typed") {
+      const resultType = operandType ?? "i32";
+      return { resultType, opType: resultType, isCall: false };
+    }
+
+    // "fn" — call / call_indirect; index is embedded in the op token
+    if (output === "fn") {
+      const resultType = operandType ?? "i32";
+      return { resultType, opType: resultType, isCall: false };
+    }
+
+    // output: null — instruction produces no value (store, br, end, …)
+    return null;
+  }
+
+  // ── Main transform pass ─────────────────────────────────────────
   return lines.map(line => {
     const indent = line.match(/^(\s*)/)[1];
     const t      = line.trim();
 
-    if (t.startsWith('export ')) {
-      const name = t.slice(7).trim().split(/\s+/)[0];
-      typeMap = { ...globalTypeMap, ...(funcRegistry[name]?.argTypes ?? {}) };
+    // ── Export header: reset local type map to globals + params ───
+    if (t.startsWith("export ")) {
+      const name    = t.slice(7).trim().split(/\s+/)[0];
+      const fnEntry = registry[name];
+      typeMap = { ...globalTypeMap, ...(fnEntry?.argTypes ?? {}) };
       return line;
     }
 
+    // ── Simple copy: dest = $src  or  dest = "literal" ───────────
     const copyM = t.match(/^(\w+)\s*=\s*(\$\w+|(?:64)?"[^"]*")$/);
     if (copyM) {
       const [, varName, rawVal] = copyM;
-      const is64         = rawVal.startsWith('64"');
-      const isConst      = is64 || rawVal.startsWith('"');
-      const ref          = isConst ? rawVal.replace(/^(?:64)?"|"$/g, '') : rawVal.slice(1);
-      const inferredType = isConst ? constType(ref, is64) : typeMap[ref];
+      const is64    = rawVal.startsWith('64"');
+      const isConst = is64 || rawVal.startsWith('"');
+      const ref     = isConst ? rawVal.replace(/^(?:64)?"|"$/g, '') : rawVal.slice(1);
+
+      const inferredType = isConst
+        ? (ref.includes('.') || /[eE]/.test(ref) ? 'f' : 'i') + (is64 ? '64' : '32')
+        : typeMap[ref];
+
       if (!inferredType) return line;
       typeMap[varName] = inferredType;
       return `${indent}${inferredType} ${varName} = ${rawVal}`;
     }
 
+    // ── Assignment from operation: dest = op(args) ────────────────
     const callM = t.match(/^(\w+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
     if (callM) {
       const [, varName, operation, argsStr] = callM;
+      const resolved = resolveTypes(operation, argsStr);
+      if (!resolved) return line;
 
-      if (funcRegistry[operation]) {
-        const { index, returnType } = funcRegistry[operation];
-        const type = (returnType && validTypes.has(returnType)) ? returnType : 'void';
-        if (type !== 'void') typeMap[varName] = type;
-        return `${indent}${type} ${varName} = callfn ${index}(${argsStr})`;
-      }
-
-      const isCmp = CMP_OPS.test(operation);
-
-      const operandType = [...argsStr.matchAll(/\$(\w+)/g)]
-        .map(m => typeMap[m[1]])
-        .find(tp => tp !== undefined);
-
-      const resultType = CONV_RESULT[operation] ?? (isCmp ? 'i32' : operandType);
-
-      if (!resultType) return line;
+      const { resultType, opType, isCall, index } = resolved;
       typeMap[varName] = resultType;
 
-      const opType = isCmp ? (operandType ?? resultType) : (CONV_RESULT[operation] ? operandType : resultType);
+      if (isCall) {
+        // User-defined function: emit callfn and drop type annotation
+        return `${indent}${resultType} ${varName} = callfn ${index}(${argsStr})`;
+      }
+
+      // Built-in: emit "resultType varName = op opType(args)"
       return `${indent}${resultType} ${varName} = ${operation} ${opType}(${argsStr})`;
     }
 
+    // ── Void call to user-defined function: op(args) ──────────────
     const voidM = t.match(/^([\w.]+)\s*\((.+)\)\s*$/);
-    if (voidM && funcRegistry[voidM[1]]) {
-      const { index } = funcRegistry[voidM[1]];
-      return `${indent}callfn ${index}(${voidM[2]})`;
+    if (voidM) {
+      const entry = registry[voidM[1]];
+      if (entry?.index !== undefined) {
+        return `${indent}callfn ${entry.index}(${voidM[2]})`;
+      }
     }
 
     return line;
@@ -703,6 +930,7 @@ function preprocess(code, libs = {}) {
     .filter((l) => l.length > 0);
 
   lines = resolveIncludes(lines, libs);
+  
 
   let temp = [];
   lines.forEach((line) => {
@@ -715,7 +943,9 @@ function preprocess(code, libs = {}) {
   lines = temp;
   console.log("after flatten:", lines);
 
-  lines = inferWasmTypes(lines);
+  let functionRegistry = registerFunctions(lines);
+
+  lines = inferWasmTypes(lines, functionRegistry);
   console.log("after inferWasmTypes:", lines);
 
   lines = evaluate(lines);
