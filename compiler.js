@@ -283,6 +283,9 @@ function inferWasmTypes(lines) {
   const constType = (raw, is64) =>
     (raw.includes('.') || /[eE]/.test(raw) ? 'f' : 'i') + (is64 ? '64' : '32');
 
+  // Comparison ops always produce i32 regardless of operand types
+  const CMP_OPS = /^(eqz|eq|ne|lt_s|lt_u|gt_s|gt_u|le_s|le_u|ge_s|ge_u)(\s|$)/;
+
   typeMap = { ...globalTypeMap };
 
   return lines.map(line => {
@@ -318,8 +321,12 @@ function inferWasmTypes(lines) {
         return `${indent}${type} ${varName} = callfn ${index}(${argsStr})`;
       }
 
-      const refs         = [...argsStr.matchAll(/\$(\w+)/g)].map(m => m[1]);
-      const inferredType = refs.map(r => typeMap[r]).find(tp => tp !== undefined);
+      const inferredType = CMP_OPS.test(operation)
+        ? 'i32'
+        : [...argsStr.matchAll(/\$(\w+)/g)]
+            .map(m => typeMap[m[1]])
+            .find(tp => tp !== undefined);
+
       if (!inferredType) return line;
       typeMap[varName] = inferredType;
       return `${indent}${inferredType} ${varName} = ${operation} ${inferredType}(${argsStr})`;
