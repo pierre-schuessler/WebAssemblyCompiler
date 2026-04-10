@@ -1,21 +1,23 @@
 function encodeULEB128(v) {
+  v = BigInt(v);
   const b = [];
   do {
-    let byte = v & 0x7f;
-    v >>>= 7;
-    if (v !== 0) byte |= 0x80;
+    let byte = Number(v & 0x7fn);
+    v >>= 7n;
+    if (v !== 0n) byte |= 0x80;
     b.push(byte);
-  } while (v !== 0);
+  } while (v !== 0n);
   return b;
 }
 
 function encodeSLEB128(v) {
+  v = BigInt(v);
   const b = [];
   let more = true;
   while (more) {
-    let byte = v & 0x7f;
-    v >>= 7;
-    if ((v === 0 && (byte & 0x40) === 0) || (v === -1 && (byte & 0x40) !== 0))
+    let byte = Number(v & 0x7fn);
+    v >>= 7n;
+    if ((v === 0n && (byte & 0x40) === 0) || (v === -1n && (byte & 0x40) !== 0))
       more = false;
     else
       byte |= 0x80;
