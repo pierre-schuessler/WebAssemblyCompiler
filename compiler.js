@@ -58,7 +58,12 @@ function encodeWasmInstruction(words) {
     tee:          () => [0x22, ...encodeULEB128(a)],
     "global.get": () => [0x23, ...encodeULEB128(a)],
     "global.set": () => [0x24, ...encodeULEB128(a)],
-    const:        () => ({f32: [0x43, ...encodeF32(a)], f64: [0x44, ...encodeF64(a)], i64: [0x42, ...encodeSLEB128(a)], i32: [0x41, ...encodeSLEB128(a)]})[type],
+    const: () => ({
+      f32: [0x43, ...encodeF32(a)],
+      f64: [0x44, ...encodeF64(a)],
+      i64: [0x42, ...encodeSLEB128(words[1])],
+      i32: [0x41, ...encodeSLEB128(words[1])],
+    })[type],
     nop:          () => [0x01],
     unreachable:  () => [0x00],
     return:       () => [0x0f],
@@ -172,7 +177,6 @@ function resolveIncludes(lines, libs = {}) {
     if (!m) { out.push(line); continue; }
     const name = m[1].trim();
     if (!(name in libs)) throw new Error(`include <${name}>: not found`);
-    // Inline the library's lines in place of the #include
     out.push(...libs[name].split("\n").map(l => l.replace(/\/\/.*$/, "").trim()).filter(Boolean));
   }
   return out;
@@ -285,7 +289,6 @@ function inferWasmTypes(lines) {
   const constType = (raw, is64) =>
     (raw.includes('.') || /[eE]/.test(raw) ? 'f' : 'i') + (is64 ? '64' : '32');
 
-  // Comparison ops: operands can be any type, but result is always i32
   const CMP_OPS = /^(eqz|eq|ne|lt_s|lt_u|gt_s|gt_u|le_s|le_u|ge_s|ge_u)(\s|$)/;
 
   typeMap = { ...globalTypeMap };
@@ -334,7 +337,6 @@ function inferWasmTypes(lines) {
       if (!resultType) return line;
       typeMap[varName] = resultType;
 
-      // Comparison ops encode the operand type in the instruction, but the variable gets i32
       const opType = isCmp ? (operandType ?? resultType) : resultType;
       return `${indent}${resultType} ${varName} = ${operation} ${opType}(${argsStr})`;
     }
@@ -361,7 +363,7 @@ function evaluate(lines) {
       const tokens = t.split(/\s+/);
       let i = 1;
       if (tokens[i] === 'mut') i++;
-      i++; // skip type
+      i++;
       if (tokens[i]) globalNames.add(tokens[i]);
     }
   }
@@ -529,7 +531,7 @@ function evaluate(lines) {
         if (lines[i + 1].trim() === getLine) {
           const usedAnywhere = lines.some((l, idx) => idx !== i + 1 && l.trim() === getLine);
           if (usedAnywhere) {
-            result.push(`tee $${varName}`);  // no type — local declaration owns the type
+            result.push(`tee $${varName}`);
           }
           i += 2;
           continue;
@@ -564,7 +566,7 @@ function artificialize(lines) {
       const tokens = t.split(/\s+/);
       let i = 1;
       if (tokens[i] === 'mut') i++;
-      i++; // skip type
+      i++;
       const name = tokens[i];
       if (name && !(name in globalIndexMap)) {
         globalIndexMap[name] = nextGlobalIndex++;
@@ -796,12 +798,10 @@ export function compile(code, libs = {}) {
         let j = 1;
         const mutable = words[j] === "mut" ? (j++, true) : false;
 
-        // type comes before name: global [mut] <type> <name> [initValue]
         const gtypeStr = words[j++];
         const gtype = TYPEMAP[gtypeStr];
         if (gtype == null) throw new Error(`Unknown global type: '${gtypeStr}'`);
 
-        // name is optional — if the next token looks like a number or is absent, auto-name
         let gname;
         if (words[j] !== undefined && isNaN(Number(words[j]))) {
           gname = words[j++];
