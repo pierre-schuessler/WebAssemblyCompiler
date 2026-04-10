@@ -283,7 +283,7 @@ function inferWasmTypes(lines) {
   const constType = (raw, is64) =>
     (raw.includes('.') || /[eE]/.test(raw) ? 'f' : 'i') + (is64 ? '64' : '32');
 
-  // Comparison ops always produce i32 regardless of operand types
+  // Comparison ops: operands can be any type, but result is always i32
   const CMP_OPS = /^(eqz|eq|ne|lt_s|lt_u|gt_s|gt_u|le_s|le_u|ge_s|ge_u)(\s|$)/;
 
   typeMap = { ...globalTypeMap };
@@ -321,15 +321,20 @@ function inferWasmTypes(lines) {
         return `${indent}${type} ${varName} = callfn ${index}(${argsStr})`;
       }
 
-      const inferredType = CMP_OPS.test(operation)
-        ? 'i32'
-        : [...argsStr.matchAll(/\$(\w+)/g)]
-            .map(m => typeMap[m[1]])
-            .find(tp => tp !== undefined);
+      const isCmp = CMP_OPS.test(operation);
 
-      if (!inferredType) return line;
-      typeMap[varName] = inferredType;
-      return `${indent}${inferredType} ${varName} = ${operation} ${inferredType}(${argsStr})`;
+      const operandType = [...argsStr.matchAll(/\$(\w+)/g)]
+        .map(m => typeMap[m[1]])
+        .find(tp => tp !== undefined);
+
+      const resultType = isCmp ? 'i32' : operandType;
+
+      if (!resultType) return line;
+      typeMap[varName] = resultType;
+
+      // Comparison ops encode the operand type in the instruction, but the variable gets i32
+      const opType = isCmp ? (operandType ?? resultType) : resultType;
+      return `${indent}${resultType} ${varName} = ${operation} ${opType}(${argsStr})`;
     }
 
     const voidM = t.match(/^([\w.]+)\s*\((.+)\)\s*$/);
