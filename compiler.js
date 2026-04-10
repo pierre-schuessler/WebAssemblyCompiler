@@ -502,20 +502,28 @@ function evaluate(lines) {
   }
 
   function collapseSetGet(lines) {
+    // Build a type map from local declarations so tee can carry the correct type
+    const localTypes = {};
+    for (const line of lines) {
+      const localM = line.trim().match(/^local\s+(\S+)\s+(\w+)$/);
+      if (localM) localTypes[localM[2]] = localM[1];
+    }
+
     const result = [];
     let i = 0;
     while (i < lines.length) {
       const t = lines[i].trim();
       const setM = t.match(/^set \$(\w+)$/);
-      
+
       if (setM && i + 1 < lines.length) {
         const varName = setM[1];
         const getLine = `get $${varName}`;
 
         if (lines[i + 1].trim() === getLine) {
-          const teeLine = `tee $${varName}`;
+          const type = localTypes[varName] ?? 'i32';
+          const teeLine = `tee ${type} $${varName}`;  // carry type forward
           const usedAnywhere = lines.some((l, idx) => idx !== i + 1 && l.trim() === getLine);
-          
+
           if (usedAnywhere) {
             result.push(teeLine);
           }
