@@ -246,18 +246,14 @@ function flatten(line) {
 function registerFunctions(lines) {
   const registry = {
 
-    // ── Variable access ──────────────────────────────────────────
     "get":        { arity: 1, output: "local"  },
     "set":        { arity: 1, output: null      },
     "tee":        { arity: 1, output: "local"  },
     "global.get": { arity: 1, output: "global" },
     "global.set": { arity: 1, output: null      },
 
-    // ── Constants ────────────────────────────────────────────────
-    // output type is determined by the type prefix (i32/i64/f32/f64)
     "const": { arity: 0, output: "typed" },
 
-    // ── Binary arithmetic (same type in → same type out) ─────────
     "add":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "same" },
     "sub":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "same" },
     "mul":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "same" },
@@ -275,12 +271,10 @@ function registerFunctions(lines) {
     "rotl":  { arity: 2, validTypes: ["i32","i64"],             output: "same" },
     "rotr":  { arity: 2, validTypes: ["i32","i64"],             output: "same" },
 
-    // ── Unary integer bit-ops ─────────────────────────────────────
     "clz":    { arity: 1, validTypes: ["i32","i64"], output: "same" },
     "ctz":    { arity: 1, validTypes: ["i32","i64"], output: "same" },
     "popcnt": { arity: 1, validTypes: ["i32","i64"], output: "same" },
 
-    // ── Unary float ops ───────────────────────────────────────────
     "abs":     { arity: 1, validTypes: ["f32","f64"], output: "same" },
     "neg":     { arity: 1, validTypes: ["f32","f64"], output: "same" },
     "ceil":    { arity: 1, validTypes: ["f32","f64"], output: "same" },
@@ -289,12 +283,10 @@ function registerFunctions(lines) {
     "nearest": { arity: 1, validTypes: ["f32","f64"], output: "same" },
     "sqrt":    { arity: 1, validTypes: ["f32","f64"], output: "same" },
 
-    // ── Binary float ops ──────────────────────────────────────────
     "min":      { arity: 2, validTypes: ["f32","f64"], output: "same" },
     "max":      { arity: 2, validTypes: ["f32","f64"], output: "same" },
     "copysign": { arity: 2, validTypes: ["f32","f64"], output: "same" },
 
-    // ── Comparisons (always produce i32) ─────────────────────────
     "eqz":  { arity: 1, validTypes: ["i32","i64"],             output: "i32" },
     "eq":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "i32" },
     "ne":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "i32" },
@@ -311,7 +303,6 @@ function registerFunctions(lines) {
     "ge_u": { arity: 2, validTypes: ["i32","i64"],             output: "i32" },
     "ge":   { arity: 2, validTypes: ["f32","f64"],             output: "i32" },
 
-    // ── Type conversions (fixed input → fixed output) ─────────────
     "i32.wrap":          { arity: 1, inputType: "i64", output: "i32" },
     "i32.trunc_s_f32":   { arity: 1, inputType: "f32", output: "i32" },
     "i32.trunc_u_f32":   { arity: 1, inputType: "f32", output: "i32" },
@@ -341,7 +332,6 @@ function registerFunctions(lines) {
     "f64.promote":       { arity: 1, inputType: "f32", output: "f64" },
     "f64.reinterpret":   { arity: 1, inputType: "i64", output: "f64" },
 
-    // ── Memory loads (output type = type prefix) ──────────────────
     "load":     { arity: 2, validTypes: ["i32","i64","f32","f64"], output: "typed" },
     "load8_s":  { arity: 2, validTypes: ["i32","i64"],             output: "typed" },
     "load8_u":  { arity: 2, validTypes: ["i32","i64"],             output: "typed" },
@@ -350,26 +340,22 @@ function registerFunctions(lines) {
     "load32_s": { arity: 2, validTypes: ["i64"],                   output: "typed" },
     "load32_u": { arity: 2, validTypes: ["i64"],                   output: "typed" },
 
-    // ── Memory stores (no output) ─────────────────────────────────
     "store":   { arity: 2, validTypes: ["i32","i64","f32","f64"], output: null },
     "store8":  { arity: 2, validTypes: ["i32","i64"],             output: null },
     "store16": { arity: 2, validTypes: ["i32","i64"],             output: null },
     "store32": { arity: 2, validTypes: ["i64"],                   output: null },
 
-    // ── Memory misc ───────────────────────────────────────────────
     "memory.size": { arity: 0, output: "i32" },
     "memory.grow": { arity: 1, validTypes: ["i32"], output: "i32" },
 
-    // ── Calls (output depends on target function signature) ───────
     "call":          { arity: -1, output: "fn" },
     "call_indirect": { arity: -1, output: "fn" },
 
-    // ── Control flow ─────────────────────────────────────────────
     "nop":         { arity: 0,  output: null   },
     "unreachable": { arity: 0,  output: null   },
     "return":      { arity: 0,  output: null   },
     "drop":        { arity: 1,  output: null   },
-    "select":      { arity: 3,  output: "same" }, // [T, T, i32] → T
+    "select":      { arity: 3,  output: "same" },
     "block":       { arity: 0,  output: null   },
     "loop":        { arity: 0,  output: null   },
     "if":          { arity: 1,  output: null   },
@@ -380,7 +366,6 @@ function registerFunctions(lines) {
     "br_table":    { arity: -1, output: null   },
   };
 
-  // ── Parse user-defined imports and exports from source lines ────
   const validTypes = new Set(["i32","i64","f32","f64"]);
   let importCount = 0;
   let exportCount = 0;
@@ -456,8 +441,6 @@ function inferWasmTypes(lines, registry = {}) {
   let   typeMap       = {};
   const validTypes    = new Set(["i32", "i64", "f32", "f64"]);
 
-  // Build global type map (registry doesn't cover globals since they
-  // aren't functions — keep this one dedicated pass)
   for (const line of lines) {
     const t = line.trim();
     const globalM = t.match(/^global\s+(?:mut\s+)?(\S+)\s+(\S+)/);
@@ -466,74 +449,53 @@ function inferWasmTypes(lines, registry = {}) {
 
   typeMap = { ...globalTypeMap };
 
-  // ── Helper: resolve result and operand annotation types ─────────
-  // Returns { resultType, opType } or null if the instruction
-  // produces no value (output: null) or is unresolvable.
   function resolveTypes(operation, argsStr) {
     const entry = registry[operation];
 
-    // Operand type: scan args left-to-right, take first known local type
     const operandType = [...argsStr.matchAll(/\$(\w+)/g)]
       .map(m => typeMap[m[1]])
       .find(t => t !== undefined);
 
-    // ── User-defined function (import / export has .index) ────────
     if (entry?.index !== undefined) {
       const ret = entry.output;
       const resultType = (ret && validTypes.has(ret)) ? ret : null;
       return resultType ? { resultType, opType: null, isCall: true, index: entry.index } : null;
     }
 
-    // ── Built-in instruction ──────────────────────────────────────
     if (!entry) {
-      // Unknown token — best-effort passthrough
       const resultType = operandType ?? "i32";
       return { resultType, opType: resultType, isCall: false };
     }
 
     const { output, inputType } = entry;
 
-    // Fixed output type (comparisons → i32, memory.size → i32, etc.)
     if (validTypes.has(output)) {
-      // opType is what the instruction itself operates on:
-      //   - conversions supply an explicit inputType  (e.g. i64 for i32.wrap)
-      //   - comparisons need the operand type         (e.g. i32 for eq i32)
-      //   - memory.size / memory.grow carry no opType meaning
       const opType = inputType ?? operandType ?? output;
       return { resultType: output, opType, isCall: false };
     }
 
-    // Same-type polymorphic (add, sub, clz, abs, select, …)
     if (output === "same") {
       const resultType = operandType ?? "i32";
       return { resultType, opType: resultType, isCall: false };
     }
 
-    // "typed" — result type is the type prefix on the instruction
-    // (memory loads: i32 load, f64 load, …).  We can only infer it
-    // from context; the address arg is always i32 so we can't derive
-    // the value type from it.  Fall back to i32 when unknown.
     if (output === "typed") {
       const resultType = operandType ?? "i32";
       return { resultType, opType: resultType, isCall: false };
     }
 
-    // "fn" — call / call_indirect; index is embedded in the op token
     if (output === "fn") {
       const resultType = operandType ?? "i32";
       return { resultType, opType: resultType, isCall: false };
     }
 
-    // output: null — instruction produces no value (store, br, end, …)
     return null;
   }
 
-  // ── Main transform pass ─────────────────────────────────────────
   return lines.map(line => {
     const indent = line.match(/^(\s*)/)[1];
     const t      = line.trim();
 
-    // ── Export header: reset local type map to globals + params ───
     if (t.startsWith("export ")) {
       const name    = t.slice(7).trim().split(/\s+/)[0];
       const fnEntry = registry[name];
@@ -541,7 +503,6 @@ function inferWasmTypes(lines, registry = {}) {
       return line;
     }
 
-    // ── Simple copy: dest = $src  or  dest = "literal" ───────────
     const copyM = t.match(/^(\w+)\s*=\s*(\$\w+|(?:64)?"[^"]*")$/);
     if (copyM) {
       const [, varName, rawVal] = copyM;
@@ -558,7 +519,6 @@ function inferWasmTypes(lines, registry = {}) {
       return `${indent}${inferredType} ${varName} = ${rawVal}`;
     }
 
-    // ── Assignment from operation: dest = op(args) ────────────────
     const callM = t.match(/^(\w+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
     if (callM) {
       const [, varName, operation, argsStr] = callM;
@@ -569,15 +529,12 @@ function inferWasmTypes(lines, registry = {}) {
       typeMap[varName] = resultType;
 
       if (isCall) {
-        // User-defined function: emit callfn and drop type annotation
         return `${indent}${resultType} ${varName} = callfn ${index}(${argsStr})`;
       }
 
-      // Built-in: emit "resultType varName = op opType(args)"
       return `${indent}${resultType} ${varName} = ${operation} ${opType}(${argsStr})`;
     }
 
-    // ── Void call to user-defined function: op(args) ──────────────
     const voidM = t.match(/^([\w.]+)\s*\((.+)\)\s*$/);
     if (voidM) {
       const entry = registry[voidM[1]];
