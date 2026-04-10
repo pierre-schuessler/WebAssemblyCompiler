@@ -1054,6 +1054,21 @@ body.dragging-panel .resize-handle {
   flex: 1;
 }
 
+.prog-file-id {
+  display: block;
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--text-muted);
+  opacity: 0.65;
+  margin-top: 1px;
+  letter-spacing: 0.02em;
+}
+
+.prog-file-item:hover .prog-file-id,
+.prog-file-item.active .prog-file-id {
+  opacity: 1;
+}
+
 /* Admin / approved programs get a golden star tint */
 .prog-admin .prog-file-icon {
   color: #c9a73e;

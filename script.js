@@ -263,9 +263,12 @@ function renderProgList() {
     for (const file of section.files) {
       const active = activeProg && !activeProg.isUser && activeProg.name === file.id;
       html += `<div class="prog-file-item prog-admin${active ? " active" : ""}" data-name="${esc(file.id)}" data-user="0">
-        <span class="prog-file-icon">★</span>
-        <span class="prog-file-name">${esc(file.name)}</span>
-      </div>`;
+      <span class="prog-file-icon">★</span>
+      <span class="prog-file-name">
+        ${esc(file.name)}
+        <span class="prog-file-id">${esc(file.id)}</span>
+      </span>
+    </div>`;
     }
   }
 
