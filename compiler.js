@@ -1,5 +1,5 @@
 function encodeULEB128(v) {
-  v = BigInt(v);
+  v = BigInt(v || 0);
   const b = [];
   do {
     let byte = Number(v & 0x7fn);
@@ -11,7 +11,7 @@ function encodeULEB128(v) {
 }
 
 function encodeSLEB128(v) {
-  v = BigInt(v);
+  v = BigInt(v || 0);
   const b = [];
   let more = true;
   while (more) {
