@@ -944,6 +944,7 @@ function preprocess(code, libs = {}) {
   console.log("after flatten:", lines);
 
   let functionRegistry = registerFunctions(lines);
+  console.log("function registry: ", functionRegistry);
 
   lines = inferWasmTypes(lines, functionRegistry);
   console.log("after inferWasmTypes:", lines);
