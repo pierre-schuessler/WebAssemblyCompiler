@@ -1,6 +1,3 @@
-memory 1
-data 0 "String to print\0"
-
 import env.putchar putchar i32
 
 export printString i32 ptr
