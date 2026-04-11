@@ -1,5 +1,5 @@
 memory 1
-data 0 "Fibonacci of 10 is: \0"
+data 0 "Fibonacci of \0 is: \0.\0"
 
 #include <print_types>
 
@@ -34,8 +34,11 @@ export fib i32 n => i32
 export main i32 input => i32
   
   printString("0")
-  
+  printInt(input)
+  printString("14")
+
   ans = fib(input)
   printInt(ans)
-  
+  printString("20")
+
   return("0")
