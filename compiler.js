@@ -438,6 +438,30 @@ function registerFunctions(lines) {
   return registry;
 }
 
+function reorder(lines) {
+  const memory  = [];
+  const imports = [];
+  const globals = [];
+  const data    = [];
+  const exports = [];
+
+  for (const line of lines) {
+    const t = line.trim();
+    const key = Object.keys({ memory: 1, import: 1, global: 1, data: 1, export: 1 })
+      .find(k => t.startsWith(k + " "));
+
+    switch (key) {
+      case "memory": memory.push(line);  break;
+      case "import": imports.push(line); break;
+      case "global": globals.push(line); break;
+      case "data":   data.push(line);    break;
+      default:       exports.push(line); break;
+    }
+  }
+
+  return [...memory, ...imports, ...globals, ...exports, ...data];
+}
+
 function inferWasmTypes(lines, registry = {}) {
   const globalTypeMap = {};
   let   typeMap       = {};
@@ -521,7 +545,6 @@ function inferWasmTypes(lines, registry = {}) {
       return `${indent}${inferredType} ${varName} = ${rawVal}`;
     }
 
-    // Multi-var call: "a, b = func(args)" — requires a comma in the LHS
     const multiCallM = t.match(/^(\w+(?:\s+\w+)?(?:,\s*\w+(?:\s+\w+)?)+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
     if (multiCallM) {
       const [, lhsStr, operation, argsStr] = multiCallM;
@@ -644,7 +667,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       continue;
     }
 
-    // Multi-var call: "type0 a, type1 b = callfn N(args)"
     const multiVarCallM = t.match(/^((?:\w+\s+\w+)(?:,\s*(?:\w+\s+\w+))*)\s*=\s*callfn\s+(\d+)\((.*)\)$/);
     if (multiVarCallM) {
       const [, lhsStr, fnIdxStr, argsStr] = multiVarCallM;
@@ -654,7 +676,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
         return { type, name };
       });
 
-      // Declare new locals (in order)
       for (const { type, name } of vars) {
         if (!globalNames.has(name) && !knownLocals.has(name)) {
           knownLocals.add(name);
@@ -663,7 +684,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
         }
       }
 
-      // Push args
       const inputTypes = callInputMap[fnIdx] ?? [];
       const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
       args.forEach((arg, argIdx) => {
@@ -681,10 +701,8 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
 
       output.push(`call ${fnIdx}`);
 
-      // Drop uncaptured return values from the top of the stack first
       const retTypes = callReturnMap[fnIdx] ?? [];
       for (let i = vars.length; i < retTypes.length; i++) output.push('drop');
-      // Then set captured vars in reverse declaration order (last var = top of remaining stack)
       for (const { name } of [...vars].reverse()) {
         output.push(globalNames.has(name) ? `global.set ${name}` : `set $${name}`);
       }
@@ -734,10 +752,8 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       if (opStr.startsWith('callfn ')) {
         const fnIdx = parseInt(opStr.slice(7).trim(), 10);
         output.push(`call ${fnIdx}`);
-        // Drop uncaptured return values from the top first
         const retTypes = callReturnMap[fnIdx] ?? [];
         for (let i = 1; i < retTypes.length; i++) output.push('drop');
-        // Set the captured variable (now on top = first return value)
         output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       } else {
         output.push(opStr);
@@ -774,7 +790,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       if (opStr.startsWith('callfn ')) {
         const fnIdx = parseInt(opStr.slice(7).trim(), 10);
         output.push(`call ${fnIdx}`);
-        // Drop any uncaught return values to keep the stack clean
         const retTypes = callReturnMap[fnIdx] ?? [];
         for (let i = 0; i < retTypes.length; i++) output.push('drop');
       } else {
@@ -961,6 +976,7 @@ function preprocess(code, libs = {}) {
 
   lines = resolveIncludes(lines, libs);
   
+  lines = reorder(lines);
 
   let temp = [];
   lines.forEach((line) => {
@@ -976,9 +992,8 @@ function preprocess(code, libs = {}) {
   let functionRegistry = registerFunctions(lines);
   console.log("function registry: ", functionRegistry);
 
-  // Build call-site maps from registry for use in evaluate()
-  const callReturnMap = {}; // fnIndex -> array of return types
-  const callInputMap  = {}; // fnIndex -> array of input types
+  const callReturnMap = {};
+  const callInputMap  = {};
   for (const entry of Object.values(functionRegistry)) {
     if (entry.index !== undefined) {
       callReturnMap[entry.index] = entry.outputs ?? (entry.output ? [entry.output] : []);
