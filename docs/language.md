@@ -4,6 +4,23 @@
 
 ## Top-level directives
 
+### `#include`
+
+```
+#include <libname>
+```
+
+Includes a named library, inserting its lines in place of the directive before compilation begins. Library names have no extension — they are looked up by name in the compiler's library map. Include directives are resolved first, before any other processing, so included code may itself contain `import`, `global`, `export`, and other top-level directives.
+
+```
+#include <math>
+#include <string>
+```
+
+If the named library is not registered with the compiler, an error is thrown at compile time.
+
+---
+
 ### `memory`
 
 ```
@@ -22,10 +39,10 @@ memory 1-16     // 1 page minimum, 16 page maximum
 ### `import`
 
 ```
-import <module>.<name> <localAlias> [<paramType> ...] => [<returnType>]
+import <module>.<n> <localAlias> [<paramType> ...] => [<returnType>]
 ```
 
-Declares an external function the module can call. `<module>.<name>` is the import path (e.g. `env.log`). `<localAlias>` is the name used to call it inside function bodies. Parameter types and return type follow the same convention as `export`. Imports with no return value omit the `=>` clause entirely.
+Declares an external function the module can call. `<module>.<n>` is the import path (e.g. `env.log`). `<localAlias>` is the name used to call it inside function bodies. Parameter types and return type follow the same convention as `export`. Imports with no return value omit the `=>` clause entirely.
 
 ```
 import env.log   log   i32       => i32   // one i32 param, returns i32
@@ -38,7 +55,7 @@ import env.pow   pow   i32 i32   => i32  // two i32 params, returns i32
 ### `global`
 
 ```
-global [mut] <type> <name> [<initValue>]
+global [mut] <type> <n> [<initValue>]
 ```
 
 Declares a module-level global variable. `mut` makes it writable. The initial value defaults to `0` if omitted.
@@ -62,9 +79,9 @@ export <funcName> [<type> <paramName> ...] => [<returnType>]
 Opens a new exported function. All body lines that follow (until the next `export` or end of file) belong to this function. Functions with no parameters or no return value simply omit those parts.
 
 ```
-export add   i32 a  i32 b  => i32   // (i32, i32) → i32
-export negate i32 x        => i32   // (i32)       → i32
-export init                         // ()          → void
+export add    i32 a  i32 b  => i32   // (i32, i32) → i32
+export negate i32 x         => i32   // (i32)       → i32
+export init                          // ()          → void
 ```
 
 ---
@@ -87,7 +104,7 @@ data 64 72 101 108 108 111   // H e l l o
 
 ## Function bodies
 
-Function bodies use an **expression-based** syntax for arithmetic and function calls. You write named assignments and the compiler lowers them to stack instructions automatically. Control flow, memory access, and stack manipulation use a **raw instruction** syntax written one instruction per line (described below).
+Function bodies use an **expression-based** syntax for arithmetic and function calls. You write named assignments and the compiler lowers them to stack instructions automatically. Control flow and memory access use the same argument-passing style — the compiler handles all stack management for you. You never need to think about what is on the stack.
 
 ---
 
@@ -103,8 +120,8 @@ Parameters declared in the `export` header and globals declared at the top level
 
 ```
 export hyp i32 a i32 b => i32
-  aa = mul(a, a)         // aa : i32  (inferred from a)
-  bb = mul(b, b)         // bb : i32  (inferred from b)
+  aa  = mul(a, a)        // aa  : i32  (inferred from a)
+  bb  = mul(b, b)        // bb  : i32  (inferred from b)
   sum = add(aa, bb)      // sum : i32
   return sum
 ```
@@ -116,10 +133,10 @@ export hyp i32 a i32 b => i32
 Numeric constants must be written as **quoted strings** in expression arguments. A constant is treated as an integer if it contains no decimal point or exponent, and as a float otherwise. By default, they are 32-bit. They can be prefixed with `64` to become 64-bit.
 
 ```
-n = add(x, "10")         // x + 10  (i32)
-r = mul(x, "0.5")        // x * 0.5 (f32)
-k = "42"                 // constant 42 assigned to k (i32)
-pi = 64"3.14159"          // constant pi assigned (f64)
+n  = add(x, "10")        // x + 10  (i32)
+r  = mul(x, "0.5")       // x * 0.5 (f32)
+k  = "42"                // constant 42 assigned to k (i32)
+pi = 64"3.14159"         // constant pi assigned (f64)
 ```
 
 ---
@@ -190,70 +207,78 @@ export double i32 x => i32
 
 ## Control flow
 
-Control flow instructions are written as raw instructions, one per line. They operate on the WebAssembly structured control stack directly and are not part of the expression system.
+Control flow instructions use the same argument-passing syntax as the rest of the language. Pass variables directly as arguments — the compiler handles all stack management for you.
 
-### `block`, `loop`, `if`
-
-```
-block [<type>]
-loop  [<type>]
-if    [<type>]
-```
-
-Open a structured control block. The optional type (`i32`, `i64`, `f32`, `f64`, or `empty`) is the block's result type — omit it or use `empty` for blocks that produce no value. Every opened block must be closed with a matching `end`.
-
-`if` pops an `i32` condition from the stack; if zero, execution jumps to the matching `else` or `end`.
+### `block`, `loop`
 
 ```
-// while (counter < 10) { counter++ }
-block empty
-  loop empty
-    cond = lt_s(counter, "10")
-    if empty
-      counter = add(counter, "1")
-    else
-      br 2          // break out of block
-    end
-    br 0            // continue loop
+block()
+loop()
+```
+
+Open a structured control block. Every opened block must be closed with a matching `end`.
+
+- `block()` — a non-looping block used as a break target. Branching from inside exits to after its `end`.
+- `loop()` — a loop block. `br 0` from inside jumps back to the top.
+
+```
+block()
+  loop()
+    // body
   end
 end
 ```
 
-### `else`
+---
+
+### `if`, `else`, `end`
 
 ```
+if(<condition>)
 else
-```
-
-Separates the true and false branches of an `if` block. Optional — an `if` with no `else` falls through to `end` when the condition is false.
-
-### `end`
-
-```
 end
 ```
 
-Closes the nearest open `block`, `loop`, or `if`.
+`if` takes an `i32` condition variable as its argument. If the condition is zero, execution jumps to the matching `else` or `end`.
+
+`else` is optional. `end` closes the nearest open `block`, `loop`, or `if`.
+
+```
+export clamp i32 x => i32
+  too_low  = lt_s(x, "0")
+  too_high = gt_s(x, "100")
+  if(too_low)
+    x = "0"
+  else
+    if(too_high)
+      x = "100"
+    end
+  end
+  return x
+```
+
+---
 
 ### `br`, `br_if`
 
 ```
 br    <depth>
-br_if <depth>
+br_if <depth>(<condition>)
 ```
 
-Branch to a enclosing block at the given nesting depth (0 = innermost). For a `loop`, branching goes back to the top; for a `block` or `if`, branching exits to after the `end`.
+Branch to an enclosing block at the given nesting depth (0 = innermost). For a `loop`, branching returns to the top; for a `block` or `if`, branching exits to after the `end`.
 
-`br` is unconditional. `br_if` pops an `i32` condition and branches only if it is non-zero.
+`br` is unconditional and takes no arguments. `br_if` takes an `i32` condition variable and branches only if it is non-zero.
 
 ```
-loop empty
-  // ...
+loop empty()
   done = eq(x, "0")
-  br_if 1      // exit loop if done
-  br 0         // otherwise repeat
+  br_if 1(done)    // exit loop if done (targets enclosing block)
+  br 0             // repeat loop (targets this loop)
 end
 ```
+
+---
 
 ### `br_table`
 
@@ -261,73 +286,108 @@ end
 br_table <depth> [<depth> ...] <defaultDepth>
 ```
 
-Pops an `i32` index from the stack and branches to the corresponding depth in the list. If the index is out of range, branches to `<defaultDepth>`.
+Branches to the depth at position `<index>` in the list, where `<index>` is an `i32` value. If the index is out of range, branches to `<defaultDepth>`.
 
 ```
-// switch on i, depths for cases 0, 1, 2, default
-br_table 0 1 2 3
+br_table 0 1 2 3   // index 0→depth 0, 1→depth 1, 2→depth 2, else→depth 3
 ```
+
+---
+
+### Full control flow example
+
+```
+// while (counter < 10) { counter++ }
+block()
+  loop()
+    cond = lt_s(counter, "10")
+    if(cond)
+      counter = add(counter, "1")
+    else
+      br 2          // exit outer block
+    end
+    br 0            // repeat loop
+  end
+end
+```
+
+Depth reference for `br` here:
+- `br 0` → back to top of `loop`
+- `br 1` → exit `loop` (after loop's `end`)
+- `br 2` → exit `block` (after block's `end`)
 
 ---
 
 ## Memory operations
 
-Memory instructions are raw instructions that read from and write to linear memory. A `memory` directive must be present. All instructions take an **alignment** and **offset** as positional arguments — both default to sensible values and can be omitted.
+Memory instructions follow the same argument-passing convention. A `memory` directive must be present.
+
+### Load
 
 ```
-load  <type> [<align> [<offset>]]
-store <type> [<align> [<offset>]]
+result = load    <type>(<address>)
+result = load8_s  <type>(<address>)
+result = load8_u  <type>(<address>)
+result = load16_s <type>(<address>)
+result = load16_u <type>(<address>)
+result = load32_s <type>(<address>)
+result = load32_u <type>(<address>)
 ```
 
-The type qualifier (e.g. `i32`, `f64`) selects the instruction variant and must be written between the instruction name and the alignment.
+Reads from linear memory at `<address>` (an `i32` expression) and produces a value of the given type.
 
-### Load instructions
-
-Pops an `i32` base address from the stack and pushes the loaded value.
-
-| Instruction | Types | Default align | Description |
-|-------------|-------|---------------|-------------|
-| `load` | i32, i64, f32, f64 | 2 | Load natural-width value |
-| `load8_s` | i32, i64 | 0 | Load 8-bit, sign-extend |
-| `load8_u` | i32, i64 | 0 | Load 8-bit, zero-extend |
-| `load16_s` | i32, i64 | 1 | Load 16-bit, sign-extend |
-| `load16_u` | i32, i64 | 1 | Load 16-bit, zero-extend |
-| `load32_s` | i64 | 2 | Load 32-bit, sign-extend |
-| `load32_u` | i64 | 2 | Load 32-bit, zero-extend |
+| Instruction | Types | Description |
+|-------------|-------|-------------|
+| `load` | i32, i64, f32, f64 | Load natural-width value |
+| `load8_s` | i32, i64 | Load 8-bit, sign-extend |
+| `load8_u` | i32, i64 | Load 8-bit, zero-extend |
+| `load16_s` | i32, i64 | Load 16-bit, sign-extend |
+| `load16_u` | i32, i64 | Load 16-bit, zero-extend |
+| `load32_s` | i64 | Load 32-bit, sign-extend |
+| `load32_u` | i64 | Load 32-bit, zero-extend |
 
 ```
-// push address, then load
-const i32 0          // raw instruction: push address 0
-x = load i32         // load i32 from address 0 (conceptual — see note below)
+addr = "0"
+val  = load i32(addr)      // read i32 from address 0
+b    = load8_u i32(addr)   // read unsigned byte from address 0
 ```
 
-> **Note:** Because memory instructions expect their address on the stack rather than as an expression argument, they are typically used via raw instruction sequences rather than the assignment expression syntax. Push the address first, then issue the load.
+### Store
 
-### Store instructions
+```
+store   <type>(<address>, <value>)
+store8  <type>(<address>, <value>)
+store16 <type>(<address>, <value>)
+store32 <type>(<address>, <value>)
+```
 
-Pops an `i32` base address, then the value to store.
+Writes `<value>` to linear memory at `<address>`.
 
-| Instruction | Types | Default align | Description |
-|-------------|-------|---------------|-------------|
-| `store` | i32, i64, f32, f64 | 2 | Store natural-width value |
-| `store8` | i32, i64 | 0 | Store low 8 bits |
-| `store16` | i32, i64 | 1 | Store low 16 bits |
-| `store32` | i64 | 2 | Store low 32 bits |
+| Instruction | Types | Description |
+|-------------|-------|-------------|
+| `store` | i32, i64, f32, f64 | Store natural-width value |
+| `store8` | i32, i64 | Store low 8 bits |
+| `store16` | i32, i64 | Store low 16 bits |
+| `store32` | i64 | Store low 32 bits |
+
+```
+addr = "0"
+store i32(addr, val)       // write val to address 0
+store8 i32(addr, val)      // write low byte of val to address 0
+```
 
 ### `memory.size` / `memory.grow`
 
 ```
-memory.size
-memory.grow
+sz  = memory.size()
+old = memory.grow(n)
 ```
 
-`memory.size` pushes the current memory size in pages as an `i32`. `memory.grow` pops the number of pages to add and pushes the previous size (or `-1` on failure).
+`memory.size()` returns the current size in pages as an `i32`. `memory.grow(n)` grows memory by `n` pages and returns the previous size, or `-1` on failure.
 
 ---
 
-## Stack utilities
-
-These instructions manipulate the value stack directly and are written as raw instructions.
+## Miscellaneous instructions
 
 ### `drop`
 
@@ -335,7 +395,7 @@ These instructions manipulate the value stack directly and are written as raw in
 drop
 ```
 
-Discards the top value on the stack. Useful for discarding the return value of a call when it is not needed and the call cannot be written as a void call in the expression syntax.
+Discards a value. Useful when a function returns a value that is not needed and cannot be written as a void call.
 
 ### `select`
 
@@ -343,19 +403,13 @@ Discards the top value on the stack. Useful for discarding the return value of a
 select
 ```
 
-Pops three values: a condition (`i32`), and two operands of the same type. Pushes the first operand if the condition is non-zero, the second otherwise. Equivalent to a branchless ternary.
-
-```
-// result = cond ? a : b
-// stack before select: a, b, cond
-select
-```
+A branchless ternary. Takes a condition (`i32`) and two operands of the same type — produces the first operand if the condition is non-zero, the second otherwise.
 
 ---
 
 ## Available operations
 
-All operations are called with the expression syntax `result = op(arg, ...)`. Types are inferred from the arguments. The type qualifier shown in the WebAssembly spec (e.g. `i32.add`) is derived automatically.
+All operations are called with the expression syntax `result = op(arg, ...)`. Types are inferred from the arguments.
 
 ### Arithmetic
 
@@ -419,8 +473,6 @@ All operations are called with the expression syntax `result = op(arg, ...)`. Ty
 
 ### Type conversions
 
-These are called with the dotted name as the operation identifier.
-
 | Name | Description |
 |------|-------------|
 | `i32.wrap` | i64 → i32 (wrapping) |
@@ -450,5 +502,3 @@ These are called with the dotted name as the operation identifier.
 | `i64` | 64-bit integer |
 | `f32` | 32-bit float |
 | `f64` | 64-bit float |
-
-The `empty` keyword is accepted as a block result type to indicate a block that produces no value. It can also appear in `import` / `export` signatures in place of omitting the `=>` clause entirely.

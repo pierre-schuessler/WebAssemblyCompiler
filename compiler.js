@@ -793,12 +793,18 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
         const retTypes = callReturnMap[fnIdx] ?? [];
         for (let i = 0; i < retTypes.length; i++) output.push('drop');
       } else {
-        output.push(opStr);
+        const needsEmpty = ['if', 'block', 'loop'].includes(opStr);
+        output.push(needsEmpty ? `${opStr} empty` : opStr);
       }
       continue;
     }
 
-    output.push(line);
+    const bare = t;
+    if (['else', 'end'].includes(bare)) {
+      output.push(`${bare} empty`);
+    } else {
+      output.push(line);
+    }
   }
 
   function collapseSetGet(lines) {
@@ -1334,3 +1340,4 @@ export function test(funct) {
       return "No test available for this function.";
   }
 }
+
