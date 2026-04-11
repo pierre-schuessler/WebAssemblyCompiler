@@ -23,3 +23,14 @@ export printInt i32 n
   digit = rem_u(n, "10")
   char = add(digit, "48")
   putchar(char)
+
+export printInt64 i64 n
+  cond = gt_u(n, 64"9")
+  if empty(cond)
+    next_n = div_u(n, 64"10")
+    printInt64(next_n)
+  end empty()
+  
+  digit = rem_u(n, 64"10")
+  char = add(digit, 64"48")
+  putchar(i32.wrap(char))
