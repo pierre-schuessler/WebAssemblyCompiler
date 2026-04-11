@@ -8,13 +8,13 @@ export main => i32
     return("0")
 
 export printString i32 startNode
-  loop empty()
+  loop()
     // 1. Load the byte from memory
     char = load8_u(startNode)
 
      // 2. Check if that character is the null terminator
     isEnd = eqz(char)
-    if empty(isEnd)
+    if(isEnd)
       return()
     end()
     

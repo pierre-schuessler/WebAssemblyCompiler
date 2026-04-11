@@ -4,7 +4,7 @@ export printString i32 ptr
   loop empty()
     char = load8_u(ptr)
     isEnd = eqz(char)
-    if empty(isEnd)
+    if(isEnd)
       return()
     end empty()
     
@@ -15,7 +15,7 @@ export printString i32 ptr
 
 export printInt i32 n
   cond = gt_u(n, "9")
-  if empty(cond)
+  if(cond)
     next_n = div_u(n, "10")
     printInt(next_n)
   end empty()
@@ -26,7 +26,7 @@ export printInt i32 n
 
 export printInt64 i64 n
   cond = gt_u(n, 64"9")
-  if empty(cond)
+  if(cond)
     next_n = div_u(n, 64"10")
     printInt64(next_n)
   end empty()
