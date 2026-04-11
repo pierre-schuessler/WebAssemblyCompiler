@@ -6,7 +6,7 @@ A lightweight in-browser WebAssembly Compiler. Write a simple, human-readable ex
 
 ## Source structure
 
-A source file is a sequence of top-level directives followed by function bodies. The order matters:
+A source file is a sequence of top-level directives followed by function bodies. The order does not matter:
 
 1. `memory` (optional, at most one)
 2. `import` lines (zero or more)

@@ -33,8 +33,6 @@ import env.print print i32               // one i32 param, no return
 import env.pow   pow   i32 i32   => i32  // two i32 params, returns i32
 ```
 
-Imports are indexed starting at 0 in the order they appear. They must all appear before any `export`.
-
 ---
 
 ### `global`
@@ -43,7 +41,7 @@ Imports are indexed starting at 0 in the order they appear. They must all appear
 global [mut] <type> <name> [<initValue>]
 ```
 
-Declares a module-level global variable. `mut` makes it writable. The initial value defaults to `0` if omitted. **Type comes before name.**
+Declares a module-level global variable. `mut` makes it writable. The initial value defaults to `0` if omitted.
 
 ```
 global     i32 MAX_SIZE 100   // immutable i32, initial value 100
@@ -68,8 +66,6 @@ export add   i32 a  i32 b  => i32   // (i32, i32) → i32
 export negate i32 x        => i32   // (i32)       → i32
 export init                         // ()          → void
 ```
-
-Exported functions are indexed starting after all imports, in the order they appear.
 
 ---
 
