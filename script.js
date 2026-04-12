@@ -640,7 +640,7 @@ console.stdout = appendToPrint;
 
 print(`<span class="c-info">WASM Compiler ready.</span>`);
 print(
-  `<span class="c-muted">compiler · run &lt;fn&gt; [args] · make · hex · clear · help</span>`,
+  `<span class="c-muted">compile · run &lt;fn&gt; [args] · make · hex · clear · help</span>`,
 );
 print("");
 
