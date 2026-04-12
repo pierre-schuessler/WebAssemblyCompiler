@@ -581,7 +581,7 @@ function inferWasmTypes(lines, registry = {}) {
       return `${indent}${resultType} ${varName} = ${operation} ${opType}(${argsStr})`;
     }
 
-    const voidM = t.match(/^([\w.]*)\s*\((.+)\)\s*$/);
+    const voidM = t.match(/^([\w.]+)\s*\((.*)\)\s*$/);
     if (voidM) {
       const entry = registry[voidM[1]];
       if (entry?.index !== undefined) {
