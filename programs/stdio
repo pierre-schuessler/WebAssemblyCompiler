@@ -16,13 +16,14 @@ export printString i32 ptr
 
 export printMemory i32 start i32 end 
     loop () 
-        char = load8_u(start) 
-        printInt(char)
+        char = load8_u(start)
         if (eqz(rem_u(start, "8"))
             printString('\n')
             printInt(start)
             printString(':')
         end()
+        printInt(char)
+        
         printString(' ')
         isEnd = eq(start, end) 
         if(isEnd) 
