@@ -28,7 +28,5 @@ export malloc i32 size => i32
     return(return_ptr)
 
 export mfree i32 ptr
-    size = load(ptr)
-    store8(add(ptr, "4"), "0")
-    dataStart = add(ptr, "5")
-    memory.fill(dataStart, "0", size)
+    ptr = sub(ptr, "5")
+    memory.fill(ptr, "0", add(load(ptr), "5"))
