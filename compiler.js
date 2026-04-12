@@ -1066,7 +1066,17 @@ export function compile(code, libs = {}) {
         const max = parts[1] != null ? Number(parts[1]) : null;
         if (isNaN(min) || min < 0) throw new Error(`Invalid memory min: '${parts[0]}'`);
         if (max !== null && (isNaN(max) || max < min)) throw new Error(`Invalid memory max: '${parts[1]}'`);
-        memory = { min, max };
+        if (memory) {
+          memory = {
+            min: Math.max(memory.min ?? 0, min),
+            max:
+              max === null && memory.max === null
+                ? null
+                : Math.max(memory.max ?? 0, max ?? 0),
+          };
+        } else {
+          memory = { min, max };
+        }
         break;
       }
 
