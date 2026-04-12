@@ -211,12 +211,14 @@ function flatten(line, tempStart = 0) {
     const inside = expr.slice(parenIdx + 1, closeIdx);
 
     const args = [];
-    let d = 0, current = "";
+    let d = 0, current = "", inStr = false;
     for (const c of inside) {
-      if (c === '(') { d++; current += c; }
-      else if (c === ')') { d--; current += c; }
+      if (c === "'" && d === 0)      { inStr = !inStr; current += c; }
+      else if (inStr)                { current += c; }
+      else if (c === '(')            { d++; current += c; }
+      else if (c === ')')            { d--; current += c; }
       else if (c === ',' && d === 0) { args.push(current.trim()); current = ""; }
-      else current += c;
+      else                           { current += c; }
     }
     if (current.trim()) args.push(current.trim());
 
