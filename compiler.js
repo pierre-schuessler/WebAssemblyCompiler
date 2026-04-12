@@ -81,6 +81,7 @@ function encodeWasmInstruction(words) {
     br_table:     () => { const t = words.slice(1).map(Number); const d = t.pop(); return [0x0e, ...encodeULEB128(t.length), ...t.flatMap(encodeULEB128), ...encodeULEB128(d)]; },
     "memory.size":() => [0x3f, 0x00],
     "memory.grow":() => [0x40, 0x00],
+    "memory.fill": () => [0xfc, 0x0b, 0x00],
     load:         () => [{ i32: 0x28, i64: 0x29, f32: 0x2a, f64: 0x2b }[type], ...encodeULEB128(a ?? 2), ...encodeULEB128(b ?? 0)],
     load8_s:      () => [{ i32: 0x2c, i64: 0x30 }[type],                        ...encodeULEB128(a ?? 0), ...encodeULEB128(b ?? 0)],
     load8_u:      () => [{ i32: 0x2d, i64: 0x31 }[type],                        ...encodeULEB128(a ?? 0), ...encodeULEB128(b ?? 0)],
@@ -353,6 +354,8 @@ function registerFunctions(lines) {
 
     "memory.size": { arity: 0, output: "i32" },
     "memory.grow": { arity: 1, validTypes: ["i32"], output: "i32" },
+
+    "memory.fill": { arity: 3, output: null },
 
     "call":          { arity: -1, output: "fn" },
     "call_indirect": { arity: -1, output: "fn" },
