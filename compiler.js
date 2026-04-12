@@ -182,9 +182,9 @@ function resolveIncludes(lines, libs = {}) {
   return out;
 }
 
-function flatten(line) {
+function flatten(line, tempStart = 0) {
   let output = [];
-  let tempIndex = 0;
+  let tempIndex = tempStart;
 
   let lhs = null;
   if (line.includes("=")) {
@@ -240,7 +240,7 @@ function flatten(line) {
     output.push(resultExpr);
   }
 
-  return output;
+  return { lines: output, nextIndex: tempIndex };
 }
 
 function registerFunctions(lines) {
@@ -1038,15 +1038,19 @@ function preprocess(code, libs = {}) {
     .filter((l) => l.length > 0);
 
   lines = resolveIncludes(lines, libs);
-  
+
   lines = reorder(lines);
 
   let temp = [];
+  let flatTempIndex = 0;
   lines.forEach((line) => {
-    if (line.startsWith("export") || line.startsWith("global") || line.startsWith("import")|| line.startsWith("memory") || line.startsWith("data")) {
+    if (line.startsWith("export") || line.startsWith("global") || line.startsWith("import") || line.startsWith("memory") || line.startsWith("data")) {
+      if (line.startsWith("export")) flatTempIndex = 0;
       temp.push(line);
     } else {
-      temp.push(...flatten(line));
+      const result = flatten(line, flatTempIndex);
+      temp.push(...result.lines);
+      flatTempIndex = result.nextIndex;
     }
   });
   lines = temp;
