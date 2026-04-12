@@ -1,3 +1,4 @@
+memory 1
 import env.putchar putchar i32
 
 export printString i32 ptr
