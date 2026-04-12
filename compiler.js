@@ -1071,6 +1071,8 @@ function preprocess(code, libs = {}) {
     .split("\n")
     .map((l) => l.replace(/\/\/.*$/, "").trim())
     .filter((l) => l.length > 0);
+  
+    console.log("input: ", code)
 
   lines = resolveIncludes(lines, libs);
 
