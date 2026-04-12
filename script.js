@@ -640,7 +640,7 @@ console.stdout = appendToPrint;
 
 print(`<span class="c-info">WASM Compiler ready.</span>`);
 print(
-  `<span class="c-muted">make · build · run &lt;fn&gt; [args] · hex · clear · help</span>`,
+  `<span class="c-muted">compiler · run &lt;fn&gt; [args] · make · hex · clear · help</span>`,
 );
 print("");
 
@@ -661,7 +661,7 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-muted">  compile         — compile only</span>`);
     print(`<span class="c-muted">  run fn [args] — call exported function</span>`);
     print(`<span class="c-muted">  make [args]   — compile &amp; test exports with given args</span>`);
-    print(`<span class="c-muted">  make [args]   — compile &amp; run "main" with given args</span>`);
+    print(`<span class="c-muted">  boot [args]   — compile &amp; run "main" with given args</span>`);
     print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
     print(`<span class="c-muted">  clear         — clear terminal</span>`);
   }
