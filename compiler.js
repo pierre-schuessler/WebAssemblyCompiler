@@ -221,15 +221,19 @@ function flatten(line, tempStart = 0) {
     if (current.trim()) args.push(current.trim());
 
     const argExprs = [];
-    for (const arg of args) {
-      if (arg.includes("(")) {
-        const tempName = `temp_${tempIndex++}`;
-        output.push(`${tempName} = ${_flatten(arg)}`);
-        argExprs.push(`$${tempName}`);
-      } else {
-        argExprs.push(_flatten(arg));
+      for (const arg of args) {
+        if (arg.includes("(")) {
+          const tempName = `temp_${tempIndex++}`;
+          output.push(`${tempName} = ${_flatten(arg)}`);
+          argExprs.push(`$${tempName}`);
+        } else if (arg.trim().startsWith("'")) {
+          const tempName = `temp_${tempIndex++}`;
+          output.push(`${tempName} = ${arg.trim()}`);
+          argExprs.push(`$${tempName}`);
+        } else {
+          argExprs.push(_flatten(arg));
+        }
       }
-    }
 
     return `${funct}(${argExprs.join(", ")})`;
   }
