@@ -15,6 +15,9 @@ export printString i32 ptr
   end()
 
 export printMemory i32 start i32 end 
+    printString('\n')
+    printInt(start)
+    printString(': ')
     loop () 
         char = load8_u(start)
         if (eqz(rem_u(start, "8"))
