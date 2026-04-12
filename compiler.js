@@ -1072,9 +1072,16 @@ function preprocess(code, libs = {}) {
     .map((l) => l.replace(/\/\/.*$/, "").trim())
     .filter((l) => l.length > 0);
   
+  lines = resolveIncludes(lines, libs);
+  
+  let lines = code
+    .split("\n")
+    .map((l) => l.replace(/\/\/.*$/, "").trim())
+    .filter((l) => l.length > 0);
+  
     console.log("input: ", code)
 
-  lines = resolveIncludes(lines, libs);
+  
 
   lines = hoistStringLiterals(lines);
 
