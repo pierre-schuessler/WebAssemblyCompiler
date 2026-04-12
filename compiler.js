@@ -991,6 +991,28 @@ function artificialize(lines) {
 function hoistStringLiterals(lines) {
   let dataEnd = 0;
 
+  function decodeString(str) {
+    const bytes = [];
+
+    for (let i = 0; i < str.length; i++) {
+      if (str[i] === '\\' && i + 1 < str.length) {
+        const esc = str[++i];
+        if      (esc === 'n')  bytes.push(10);
+        else if (esc === 'r')  bytes.push(13);
+        else if (esc === 't')  bytes.push(9);
+        else if (esc === '0')  bytes.push(0);
+        else if (esc === '\\') bytes.push(92);
+        else if (esc === '"')  bytes.push(34);
+        else bytes.push(esc.charCodeAt(0));
+      } else {
+        bytes.push(str.charCodeAt(i));
+      }
+    }
+
+    return bytes;
+  }
+
+  // --- pass 1: find end of existing data ---
   for (const line of lines) {
     const t = line.trim();
     if (!t.startsWith('data ')) continue;
@@ -1004,10 +1026,7 @@ function hoistStringLiterals(lines) {
 
     if (rest.startsWith('"')) {
       const str = rest.slice(1, rest.lastIndexOf('"'));
-      for (let i = 0; i < str.length; i++) {
-        if (str[i] === '\\' && i + 1 < str.length) i++;
-        byteCount++;
-      }
+      byteCount = decodeString(str).length;
     } else {
       byteCount = tokens.slice(2).length;
     }
@@ -1018,15 +1037,13 @@ function hoistStringLiterals(lines) {
   let currentOffset = dataEnd;
 
   const stringEntries = [];
-  const replacements = [];
 
+  // --- pass 2: replace '...' with offsets ---
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     const line = lines[lineIndex];
 
-    let matchIndex = 0;
-
     const newLine = line.replace(/'([^']*)'/g, (_, str) => {
-      const dataBytes = [...str].map(c => c.charCodeAt(0));
+      const dataBytes = decodeString(str);
       dataBytes.push(0);
 
       const len = dataBytes.length;
@@ -1046,8 +1063,9 @@ function hoistStringLiterals(lines) {
 
   const dataLines = [];
 
+  // --- pass 3: emit data ---
   for (const { str, offset } of stringEntries) {
-    const dataBytes = [...str].map(c => c.charCodeAt(0));
+    const dataBytes = decodeString(str);
     dataBytes.push(0);
 
     const len = dataBytes.length;
