@@ -231,7 +231,8 @@ const PROG_SECTIONS = [
   {
     label: "Libraries",
     files: [
-      { id: "print_types",    name: "Printing different types" },
+      { id: "system",    name: "System management" },
+      { id: "stdout",    name: "Printing different types to standart output" },
     ]
   },
 ];

@@ -1,0 +1,28 @@
+memory 1
+global mut i32 heap_ptr 0
+
+export sysinit i32 n =>
+    loop()
+        next_ptr = load(heap_ptr)
+        if(eqz(next_ptr))
+            return()
+        end()
+        heap_ptr = add(heap_ptr, add(next_ptr, "5"))
+        br 0()
+    end()
+
+export malloc i32 size => i32
+    // store size (4 bytes)
+    store(heap_ptr, size)
+
+    // store flag (1 = used)
+    heap_ptr = add(heap_ptr, "4")
+    store8(heap_ptr, "1")
+
+    // return pointer = heap_ptr + 8
+    return_ptr = add(heap_ptr, "1")
+
+    // move heap_ptr forward
+    heap_ptr = add(heap_ptr, add(size, "1"))
+
+    return(return_ptr)
