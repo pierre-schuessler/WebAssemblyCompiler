@@ -27,12 +27,13 @@ export printMemory i32 start i32 end
         printString(' ')
         isEnd = eq(start, end) 
         if(isEnd) 
+            printString('\n')
             return() 
         end() 
         start = add(start, "1") 
         br 0() 
     end()
-    printString('\n')
+    
 
 export printInt i32 n
   cond = gt_u(n, "9")
