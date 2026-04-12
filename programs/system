@@ -30,3 +30,5 @@ export malloc i32 size => i32
 export mfree i32 ptr
     ptr = sub(ptr, "5")
     memory.fill(ptr, "0", add(load(ptr), "5"))
+    heap_ptr = "0"
+    sysinit()
