@@ -1,7 +1,7 @@
 memory 1
 data 0 "Fibonacci of \0 is: \0.\0"
 
-#include <stdout>
+#include <stdio>
 
 export fib i32 n => i32
   a = "0"

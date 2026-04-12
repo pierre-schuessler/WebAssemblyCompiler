@@ -2,24 +2,42 @@ memory 1
 import env.putchar putchar i32
 
 export printString i32 ptr
-  loop empty()
+  loop()
     char = load8_u(ptr)
     isEnd = eqz(char)
     if(isEnd)
       return()
-    end empty()
+    end()
     
     putchar(char)
     ptr = add(ptr, "1")
     br 0()
-  end empty()
+  end()
+
+export printMemory i32 start i32 end 
+    loop () 
+        char = load8_u(start) 
+        printInt(char)
+        if (eqz(rem_u(start, "8"))
+            printString('\n')
+            printInt(start)
+            printString(':')
+        end()
+        printString(' ')
+        isEnd = eq(start, end) 
+        if(isEnd) 
+            return() 
+        end() 
+        start = add(start, "1") 
+        br 0() 
+    end()
 
 export printInt i32 n
   cond = gt_u(n, "9")
   if(cond)
     next_n = div_u(n, "10")
     printInt(next_n)
-  end empty()
+  end()
   
   digit = rem_u(n, "10")
   char = add(digit, "48")
@@ -30,7 +48,7 @@ export printInt64 i64 n
   if(cond)
     next_n = div_u(n, 64"10")
     printInt64(next_n)
-  end empty()
+  end()
   
   digit = rem_u(n, 64"10")
   char = add(digit, 64"48")
