@@ -1070,7 +1070,7 @@ function hoistStringLiterals(lines) {
   // Replace every 'string' token with its compile-time pointer address.
   // The double-quoted form is the existing notation for i32 numeric constants.
   const newLines = lines.map(line =>
-    line.replace(/'([^']*)'/g, (_, str) => `"${stringMap.get(str)}"`)
+    line.replace(/'([^']*)'/g, (_, str) => `"${stringMap.get(str)+5}"`)
   );
 
   // Prepend the data directives — reorder() will place them correctly.
