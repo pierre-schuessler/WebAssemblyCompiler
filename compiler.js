@@ -197,7 +197,6 @@ function flatten(line, tempStart = 0) {
     expr = expr.trim();
     const parenIdx = expr.indexOf("(");
     if (parenIdx === -1) {
-      // don't $-prefix numeric string literals (double-quoted) or single-quoted strings
       return (expr.startsWith('"') || expr.startsWith('64"') || expr.startsWith("'")) ? expr : `$${expr}`;
     }
 
@@ -989,35 +988,21 @@ function artificialize(lines) {
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// hoistStringLiterals
-//
-// Runs before reorder() and flatten(). Finds every single-quoted string
-// literal ('...') anywhere in the source, writes it into the data segment
-// with the layout:
-//
-//   [size : 4 bytes LE]  [0x01 : 1 byte]  [string bytes + NUL terminator]
-//
-// and replaces the literal in-place with a double-quoted numeric constant
-// holding the pointer to that block (e.g. 'hello' → "0").  reorder() will
-// then sort the generated `data` directives to the correct section, and the
-// existing double-quoted literal handling in evaluate() will emit the right
-// `const i32 <ptr>` instruction.
-// ---------------------------------------------------------------------------
 function hoistStringLiterals(lines) {
-  // Determine the byte-end of all pre-existing data segments so string
-  // blocks are placed after them and never overlap.
   let dataEnd = 0;
+
   for (const line of lines) {
     const t = line.trim();
     if (!t.startsWith('data ')) continue;
+
     const tokens = t.split(/\s+/);
     const offset = Number(tokens[1]);
     if (isNaN(offset)) continue;
+
     const rest = t.slice(t.indexOf(tokens[1]) + tokens[1].length).trim();
     let byteCount = 0;
+
     if (rest.startsWith('"')) {
-      // Walk the escape-aware string exactly as compile() does.
       const str = rest.slice(1, rest.lastIndexOf('"'));
       for (let i = 0; i < str.length; i++) {
         if (str[i] === '\\' && i + 1 < str.length) i++;
@@ -1026,39 +1011,50 @@ function hoistStringLiterals(lines) {
     } else {
       byteCount = tokens.slice(2).length;
     }
+
     dataEnd = Math.max(dataEnd, offset + byteCount);
   }
 
-  // Collect unique string literals in order of first appearance.
-  const stringMap = new Map(); // content → data-segment offset
   let currentOffset = dataEnd;
 
-  for (const line of lines) {
-    for (const [, str] of line.matchAll(/'([^']*)'/g)) {
-      if (!stringMap.has(str)) {
-        const dataBytes = [...str].map(c => c.charCodeAt(0));
-        dataBytes.push(0); // NUL terminator
-        const len = dataBytes.length;
-        // Block: 4-byte LE size | 1-byte marker (0x01) | data+NUL
-        stringMap.set(str, currentOffset);
-        currentOffset += 4 + 1 + len;
-      }
-    }
+  const stringEntries = [];
+  const replacements = [];
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+
+    let matchIndex = 0;
+
+    const newLine = line.replace(/'([^']*)'/g, (_, str) => {
+      const dataBytes = [...str].map(c => c.charCodeAt(0));
+      dataBytes.push(0);
+
+      const len = dataBytes.length;
+
+      const offset = currentOffset;
+      currentOffset += 4 + 1 + len;
+
+      stringEntries.push({ str, offset });
+
+      return `"${offset + 5}"`;
+    });
+
+    lines[lineIndex] = newLine;
   }
 
-  if (stringMap.size === 0) return lines;
+  if (stringEntries.length === 0) return lines;
 
-  // Build one `data` directive per unique string.
   const dataLines = [];
-  for (const [str, offset] of stringMap) {
+
+  for (const { str, offset } of stringEntries) {
     const dataBytes = [...str].map(c => c.charCodeAt(0));
-    dataBytes.push(0); // NUL terminator
+    dataBytes.push(0);
+
     const len = dataBytes.length;
 
-    // 32-bit little-endian size field.
     const sizeBytes = [
-      (len >>> 0)  & 0xff,
-      (len >>> 8)  & 0xff,
+      (len >>> 0) & 0xff,
+      (len >>> 8) & 0xff,
       (len >>> 16) & 0xff,
       (len >>> 24) & 0xff,
     ];
@@ -1067,14 +1063,7 @@ function hoistStringLiterals(lines) {
     dataLines.push(`data ${offset} ${allBytes.join(' ')}`);
   }
 
-  // Replace every 'string' token with its compile-time pointer address.
-  // The double-quoted form is the existing notation for i32 numeric constants.
-  const newLines = lines.map(line =>
-    line.replace(/'([^']*)'/g, (_, str) => `"${stringMap.get(str)+5}"`)
-  );
-
-  // Prepend the data directives — reorder() will place them correctly.
-  return [...dataLines, ...newLines];
+  return [...dataLines, ...lines];
 }
 
 function preprocess(code, libs = {}) {
@@ -1085,7 +1074,6 @@ function preprocess(code, libs = {}) {
 
   lines = resolveIncludes(lines, libs);
 
-  // Hoist string literals to the data segment before any other transforms.
   lines = hoistStringLiterals(lines);
 
   lines = reorder(lines);
