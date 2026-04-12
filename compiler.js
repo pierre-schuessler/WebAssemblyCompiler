@@ -1114,19 +1114,21 @@ function preprocess(code, libs = {}) {
   lines.forEach((line) => {
     const trimmed = line.trim();
     
-    // 1. Extract the very first pure word (letters/numbers/underscores)
+    // 1. Extract the pure word up to any symbol (space, dot, parenthesis, etc.)
     const match = trimmed.match(/^([a-zA-Z_]\w*)/);
     const firstWord = match ? match[1] : "";
 
-    // 2. Look at what immediately follows that word (ignoring spaces)
+    // 2. Extract whatever follows the word, stripped of leading spaces
     const remainder = trimmed.slice(firstWord.length).trim();
 
-    // 3. It is a WebAssembly directive ONLY if it's a keyword AND isn't acting like code
-    if (keywords.includes(firstWord) && !remainder.startsWith("=") && !remainder.startsWith("(")) {
+    // 3. A real WASM directive's arguments must start with a letter, number, quote, or $.
+    const isDirectiveArg = /^[a-zA-Z0-9_$"']/.test(remainder);
+
+    if (keywords.includes(firstWord) && (remainder === "" || isDirectiveArg)) {
       if (firstWord === "export") flatTempIndex = 0;
       temp.push(trimmed);
     } else {
-      // Everything else safely goes to flatten!
+      // Safely flattens: memory.fill(...), dataStart = ..., data("1"), etc.
       const result = flatten(trimmed, flatTempIndex);
       temp.push(...result.lines);
       flatTempIndex = result.nextIndex;
