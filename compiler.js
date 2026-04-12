@@ -197,7 +197,8 @@ function flatten(line, tempStart = 0) {
     expr = expr.trim();
     const parenIdx = expr.indexOf("(");
     if (parenIdx === -1) {
-      return (expr.startsWith('"') || expr.startsWith('64"')) ? expr : `$${expr}`;
+      // FIX #1: don't $-prefix single-quoted string literals
+      return (expr.startsWith('"') || expr.startsWith('64"') || expr.startsWith("'")) ? expr : `$${expr}`;
     }
 
     const funct = expr.slice(0, parenIdx).trim();
@@ -587,7 +588,9 @@ function inferWasmTypes(lines, registry = {}) {
   });
 }
 
-function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
+// FIX #2: added nameToIndex parameter so the string literal handler can
+// resolve "malloc" (and any other imported/exported function) by name.
+function evaluate(lines, callReturnMap = {}, callInputMap = {}, nameToIndex = {}) {
   const output = [];
   const globalNames = new Set();
   let exportIdx = -1;
@@ -621,9 +624,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
         } else { i++; }
       }
 
-      // Start tempIndex just above the highest temp_N used anywhere in this
-      // function's body, so evaluate's temps never collide with flatten's.
-      // We scan forward to the next export (or end) to find all temp_N names.
       tempIndex = 0;
       for (const bodyLine of lines) {
         for (const m of bodyLine.matchAll(/\btemp_(\d+)\b/g)) {
@@ -649,8 +649,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
     }
 
     // ── String literal: dest = 'hello world' ─────────────────────────────────
-    // Calls malloc(len), uses a fresh temp_N local as the walking pointer;
-    // dest holds the original base pointer.
     const strLitM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*'([^']*)'$/);
     if (strLitM) {
       const [, , dest, str] = strLitM;
@@ -659,34 +657,34 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       bytes.push(0); // null terminator
       const len = bytes.length;
 
-      // dest holds the base pointer (i32)
       if (!globalNames.has(dest) && !knownLocals.has(dest)) {
         knownLocals.add(dest);
         output.splice(exportIdx + 1, 0, `local i32 ${dest}`);
         exportIdx++;
       }
 
-      // Allocate a fresh temp_N local as the walking pointer
       const ptrName = `temp_${tempIndex++}`;
       knownLocals.add(ptrName);
       output.splice(exportIdx + 1, 0, `local i32 ${ptrName}`);
       exportIdx++;
 
-      // malloc(len) → tee into dest, copy into ptrName
+      // FIX #2: resolve malloc index by name instead of emitting "call malloc"
+      const mallocIdx = nameToIndex['malloc'];
+      if (mallocIdx === undefined) throw new Error(`String literal requires 'malloc' to be imported or exported, but it was not found.`);
+
       output.push(`const i32 ${len}`);
-      output.push(`call malloc`);
+      output.push(`call ${mallocIdx}`);   // was: call malloc
       output.push(`tee $${dest}`);
       output.push(`set $${ptrName}`);
 
-      // Store each byte at ptrName, advance after each (except the last)
       for (let i = 0; i < bytes.length; i++) {
         output.push(`get $${ptrName}`);
         output.push(`const i32 ${bytes[i]}`);
-        output.push(`i32.store8`);
+        output.push(`store8 i32`);        // FIX #3: was i32.store8
         if (i < bytes.length - 1) {
           output.push(`get $${ptrName}`);
           output.push(`const i32 1`);
-          output.push(`i32.add`);
+          output.push(`add i32`);         // FIX #4: was i32.add
           output.push(`set $${ptrName}`);
         }
       }
@@ -1061,17 +1059,20 @@ function preprocess(code, libs = {}) {
 
   const callReturnMap = {};
   const callInputMap  = {};
-  for (const entry of Object.values(functionRegistry)) {
+  // FIX #2: build nameToIndex from the registry and pass it to evaluate
+  const nameToIndex   = {};
+  for (const [name, entry] of Object.entries(functionRegistry)) {
     if (entry.index !== undefined) {
       callReturnMap[entry.index] = entry.outputs ?? (entry.output ? [entry.output] : []);
       callInputMap[entry.index]  = entry.inputTypes ?? [];
+      nameToIndex[name]          = entry.index;
     }
   }
 
   lines = inferWasmTypes(lines, functionRegistry);
   console.log("after inferWasmTypes:", lines);
 
-  lines = evaluate(lines, callReturnMap, callInputMap);
+  lines = evaluate(lines, callReturnMap, callInputMap, nameToIndex);
   console.log("after evaluate:", lines);
 
   lines = artificialize(lines);
@@ -1411,4 +1412,3 @@ export function test(funct) {
       return "No test available for this function.";
   }
 }
-
