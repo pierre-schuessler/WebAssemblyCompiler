@@ -592,6 +592,7 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
   const globalNames = new Set();
   let exportIdx = -1;
   let knownLocals = new Set();
+  let tempIndex = 0;
 
   for (const line of lines) {
     const t = line.trim();
@@ -620,6 +621,16 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
         } else { i++; }
       }
 
+      // Start tempIndex just above the highest temp_N used anywhere in this
+      // function's body, so evaluate's temps never collide with flatten's.
+      // We scan forward to the next export (or end) to find all temp_N names.
+      tempIndex = 0;
+      for (const bodyLine of lines) {
+        for (const m of bodyLine.matchAll(/\btemp_(\d+)\b/g)) {
+          tempIndex = Math.max(tempIndex, parseInt(m[1], 10) + 1);
+        }
+      }
+
       output.push(line);
       continue;
     }
@@ -634,6 +645,52 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       const name = returnM[1];
       output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
       output.push(`return`);
+      continue;
+    }
+
+    // ── String literal: dest = 'hello world' ─────────────────────────────────
+    // Calls malloc(len), uses a fresh temp_N local as the walking pointer;
+    // dest holds the original base pointer.
+    const strLitM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*'([^']*)'$/);
+    if (strLitM) {
+      const [, , dest, str] = strLitM;
+
+      const bytes = [...str].map(c => c.charCodeAt(0));
+      bytes.push(0); // null terminator
+      const len = bytes.length;
+
+      // dest holds the base pointer (i32)
+      if (!globalNames.has(dest) && !knownLocals.has(dest)) {
+        knownLocals.add(dest);
+        output.splice(exportIdx + 1, 0, `local i32 ${dest}`);
+        exportIdx++;
+      }
+
+      // Allocate a fresh temp_N local as the walking pointer
+      const ptrName = `temp_${tempIndex++}`;
+      knownLocals.add(ptrName);
+      output.splice(exportIdx + 1, 0, `local i32 ${ptrName}`);
+      exportIdx++;
+
+      // malloc(len) → tee into dest, copy into ptrName
+      output.push(`const i32 ${len}`);
+      output.push(`call malloc`);
+      output.push(`tee $${dest}`);
+      output.push(`set $${ptrName}`);
+
+      // Store each byte at ptrName, advance after each (except the last)
+      for (let i = 0; i < bytes.length; i++) {
+        output.push(`get $${ptrName}`);
+        output.push(`const i32 ${bytes[i]}`);
+        output.push(`i32.store8`);
+        if (i < bytes.length - 1) {
+          output.push(`get $${ptrName}`);
+          output.push(`const i32 1`);
+          output.push(`i32.add`);
+          output.push(`set $${ptrName}`);
+        }
+      }
+
       continue;
     }
 
