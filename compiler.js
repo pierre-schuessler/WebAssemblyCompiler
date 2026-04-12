@@ -197,7 +197,7 @@ function flatten(line, tempStart = 0) {
     expr = expr.trim();
     const parenIdx = expr.indexOf("(");
     if (parenIdx === -1) {
-      // FIX #1: don't $-prefix single-quoted string literals
+      // don't $-prefix numeric string literals (double-quoted) or single-quoted strings
       return (expr.startsWith('"') || expr.startsWith('64"') || expr.startsWith("'")) ? expr : `$${expr}`;
     }
 
@@ -594,9 +594,7 @@ function inferWasmTypes(lines, registry = {}) {
   });
 }
 
-// FIX #2: added nameToIndex parameter so the string literal handler can
-// resolve "malloc" (and any other imported/exported function) by name.
-function evaluate(lines, callReturnMap = {}, callInputMap = {}, nameToIndex = {}) {
+function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
   const output = [];
   const globalNames = new Set();
   let exportIdx = -1;
@@ -651,50 +649,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}, nameToIndex = {}
       const name = returnM[1];
       output.push(globalNames.has(name) ? `global.get ${name}` : `get $${name}`);
       output.push(`return`);
-      continue;
-    }
-
-    // ── String literal: dest = 'hello world' ─────────────────────────────────
-    const strLitM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*'([^']*)'$/);
-    if (strLitM) {
-      const [, , dest, str] = strLitM;
-
-      const bytes = [...str].map(c => c.charCodeAt(0));
-      bytes.push(0); // null terminator
-      const len = bytes.length;
-
-      if (!globalNames.has(dest) && !knownLocals.has(dest)) {
-        knownLocals.add(dest);
-        output.splice(exportIdx + 1, 0, `local i32 ${dest}`);
-        exportIdx++;
-      }
-
-      const ptrName = `temp_${tempIndex++}`;
-      knownLocals.add(ptrName);
-      output.splice(exportIdx + 1, 0, `local i32 ${ptrName}`);
-      exportIdx++;
-
-      // FIX #2: resolve malloc index by name instead of emitting "call malloc"
-      const mallocIdx = nameToIndex['malloc'];
-      if (mallocIdx === undefined) throw new Error(`String literal requires 'malloc' to be imported or exported, but it was not found.`);
-
-      output.push(`const i32 ${len}`);
-      output.push(`call ${mallocIdx}`);   // was: call malloc
-      output.push(`tee $${dest}`);
-      output.push(`set $${ptrName}`);
-
-      for (let i = 0; i < bytes.length; i++) {
-        output.push(`get $${ptrName}`);
-        output.push(`const i32 ${bytes[i]}`);
-        output.push(`store8 i32`);        // FIX #3: was i32.store8
-        if (i < bytes.length - 1) {
-          output.push(`get $${ptrName}`);
-          output.push(`const i32 1`);
-          output.push(`add i32`);         // FIX #4: was i32.add
-          output.push(`set $${ptrName}`);
-        }
-      }
-
       continue;
     }
 
@@ -1035,6 +989,94 @@ function artificialize(lines) {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// hoistStringLiterals
+//
+// Runs before reorder() and flatten(). Finds every single-quoted string
+// literal ('...') anywhere in the source, writes it into the data segment
+// with the layout:
+//
+//   [size : 4 bytes LE]  [0x01 : 1 byte]  [string bytes + NUL terminator]
+//
+// and replaces the literal in-place with a double-quoted numeric constant
+// holding the pointer to that block (e.g. 'hello' → "0").  reorder() will
+// then sort the generated `data` directives to the correct section, and the
+// existing double-quoted literal handling in evaluate() will emit the right
+// `const i32 <ptr>` instruction.
+// ---------------------------------------------------------------------------
+function hoistStringLiterals(lines) {
+  // Determine the byte-end of all pre-existing data segments so string
+  // blocks are placed after them and never overlap.
+  let dataEnd = 0;
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t.startsWith('data ')) continue;
+    const tokens = t.split(/\s+/);
+    const offset = Number(tokens[1]);
+    if (isNaN(offset)) continue;
+    const rest = t.slice(t.indexOf(tokens[1]) + tokens[1].length).trim();
+    let byteCount = 0;
+    if (rest.startsWith('"')) {
+      // Walk the escape-aware string exactly as compile() does.
+      const str = rest.slice(1, rest.lastIndexOf('"'));
+      for (let i = 0; i < str.length; i++) {
+        if (str[i] === '\\' && i + 1 < str.length) i++;
+        byteCount++;
+      }
+    } else {
+      byteCount = tokens.slice(2).length;
+    }
+    dataEnd = Math.max(dataEnd, offset + byteCount);
+  }
+
+  // Collect unique string literals in order of first appearance.
+  const stringMap = new Map(); // content → data-segment offset
+  let currentOffset = dataEnd;
+
+  for (const line of lines) {
+    for (const [, str] of line.matchAll(/'([^']*)'/g)) {
+      if (!stringMap.has(str)) {
+        const dataBytes = [...str].map(c => c.charCodeAt(0));
+        dataBytes.push(0); // NUL terminator
+        const len = dataBytes.length;
+        // Block: 4-byte LE size | 1-byte marker (0x01) | data+NUL
+        stringMap.set(str, currentOffset);
+        currentOffset += 4 + 1 + len;
+      }
+    }
+  }
+
+  if (stringMap.size === 0) return lines;
+
+  // Build one `data` directive per unique string.
+  const dataLines = [];
+  for (const [str, offset] of stringMap) {
+    const dataBytes = [...str].map(c => c.charCodeAt(0));
+    dataBytes.push(0); // NUL terminator
+    const len = dataBytes.length;
+
+    // 32-bit little-endian size field.
+    const sizeBytes = [
+      (len >>> 0)  & 0xff,
+      (len >>> 8)  & 0xff,
+      (len >>> 16) & 0xff,
+      (len >>> 24) & 0xff,
+    ];
+
+    const allBytes = [...sizeBytes, 0x01, ...dataBytes];
+    dataLines.push(`data ${offset} ${allBytes.join(' ')}`);
+  }
+
+  // Replace every 'string' token with its compile-time pointer address.
+  // The double-quoted form is the existing notation for i32 numeric constants.
+  const newLines = lines.map(line =>
+    line.replace(/'([^']*)'/g, (_, str) => `"${stringMap.get(str)}"`)
+  );
+
+  // Prepend the data directives — reorder() will place them correctly.
+  return [...dataLines, ...newLines];
+}
+
 function preprocess(code, libs = {}) {
   let lines = code
     .split("\n")
@@ -1042,6 +1084,9 @@ function preprocess(code, libs = {}) {
     .filter((l) => l.length > 0);
 
   lines = resolveIncludes(lines, libs);
+
+  // Hoist string literals to the data segment before any other transforms.
+  lines = hoistStringLiterals(lines);
 
   lines = reorder(lines);
 
@@ -1065,20 +1110,17 @@ function preprocess(code, libs = {}) {
 
   const callReturnMap = {};
   const callInputMap  = {};
-  // FIX #2: build nameToIndex from the registry and pass it to evaluate
-  const nameToIndex   = {};
-  for (const [name, entry] of Object.entries(functionRegistry)) {
+  for (const [, entry] of Object.entries(functionRegistry)) {
     if (entry.index !== undefined) {
       callReturnMap[entry.index] = entry.outputs ?? (entry.output ? [entry.output] : []);
       callInputMap[entry.index]  = entry.inputTypes ?? [];
-      nameToIndex[name]          = entry.index;
     }
   }
 
   lines = inferWasmTypes(lines, functionRegistry);
   console.log("after inferWasmTypes:", lines);
 
-  lines = evaluate(lines, callReturnMap, callInputMap, nameToIndex);
+  lines = evaluate(lines, callReturnMap, callInputMap);
   console.log("after evaluate:", lines);
 
   lines = artificialize(lines);
