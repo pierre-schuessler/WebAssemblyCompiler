@@ -1109,12 +1109,25 @@ function preprocess(code, libs = {}) {
 
   let temp = [];
   let flatTempIndex = 0;
+  const keywords = ["export", "global", "import", "memory", "data"];
+
   lines.forEach((line) => {
-    if (line.startsWith("export") || line.startsWith("global") || line.startsWith("import") || line.startsWith("memory") || line.startsWith("data")) {
-      if (line.startsWith("export")) flatTempIndex = 0;
-      temp.push(line);
+    const trimmed = line.trim();
+    
+    // 1. Extract the very first pure word (letters/numbers/underscores)
+    const match = trimmed.match(/^([a-zA-Z_]\w*)/);
+    const firstWord = match ? match[1] : "";
+
+    // 2. Look at what immediately follows that word (ignoring spaces)
+    const remainder = trimmed.slice(firstWord.length).trim();
+
+    // 3. It is a WebAssembly directive ONLY if it's a keyword AND isn't acting like code
+    if (keywords.includes(firstWord) && !remainder.startsWith("=") && !remainder.startsWith("(")) {
+      if (firstWord === "export") flatTempIndex = 0;
+      temp.push(trimmed);
     } else {
-      const result = flatten(line, flatTempIndex);
+      // Everything else safely goes to flatten!
+      const result = flatten(trimmed, flatTempIndex);
       temp.push(...result.lines);
       flatTempIndex = result.nextIndex;
     }
