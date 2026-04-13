@@ -32,7 +32,7 @@ export MemPrintf
         printInt(size)
         printString(', busy ')
         printInt(busy)
-        printString('): ')
+        printString('): \'')
 
         // Setup pointers for the FIRST pass (ASCII)
         p = add(addr, "5")
@@ -70,7 +70,7 @@ export MemPrintf
         end()
 
         // Separator between ASCII and Integers
-        printString('  [ ')
+        printString('\'  [ ')
 
         // Reset pointer for the SECOND pass (Integers)
         p = add(addr, "5")
