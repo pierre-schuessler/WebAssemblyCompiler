@@ -14,62 +14,138 @@ export printString i32 ptr
     br 0()
   end()
 
-export printMemory i32 start i32 end 
-
-    curr = start
-    line_start = start
+export MemPrintf
+    addr = "0"
+    n = "0"
 
     loop()
-        if(eq(curr, line_start))
+        size = load(addr)
+        if(eqz(size))
+            return()
+        end()
+
+        busy = load8_u(add(addr, "4"))
+
+        printString('Block ')
+        printInt(n)
+        printString(' (size ')
+        printInt(size)
+        printString(', busy ')
+        printInt(busy)
+        printString('): ')
+
+        // Setup pointers for the FIRST pass (ASCII)
+        p = add(addr, "5")
+        p_end = add(p, size)
+
+        // PASS 1: Print all ASCII characters
+        block()
+            loop()
+                isDone = eq(p, p_end)
+                if(isDone)
+                    br 2() // Break out of ASCII loop
+                end()
+
+                c = load8_u(p)
+                
+                isNewline = eq(c, "10")
+                if(isNewline)
+                    putchar("92")  // '\'
+                    putchar("110") // 'n'
+                else()
+                    isPrintable1 = ge_u(c, "32")
+                    isPrintable2 = lt_u(c, "127")
+                    isPrintable = and(isPrintable1, isPrintable2)
+
+                    if(isPrintable)
+                        putchar(c)
+                    else()
+                        putchar("46") // '.'
+                    end()
+                end()
+
+                p = add(p, "1")
+                br 0()
+            end()
+        end()
+
+        // Separator between ASCII and Integers
+        printString('  [ ')
+
+        // Reset pointer for the SECOND pass (Integers)
+        p = add(addr, "5")
+
+        // PASS 2: Print all Integer values
+        block()
+            loop()
+                isDone = eq(p, p_end)
+                if(isDone)
+                    printString(']\n') // Close the bracket and newline
+                    br 2() // Break out of Integer loop
+                end()
+
+                c = load8_u(p)
+                printInt(c)
+                printString(' ')
+
+                p = add(p, "1")
+                br 0()
+            end()
+        end()
+
+        // Move to the next memory block
+        addr = add(addr, add(size, "5"))
+        n = add(n, "1")
+        br 0()
+    end()
+
+export printMemory i32 start i32 end 
+    curr = start
+
+    loop()
+        // Print newline and address at the beginning of a line (every 8 bytes)
+        if (eqz(rem_u(curr, "8")))
             printString('\n')
             printInt(curr)
             printString(': ')
         end()
 
+        // Load the byte and print its integer value
         c = load8_u(curr)
         printInt(c)
-        printString(' ')
+        printString('(')
 
-        isEndOfLine = eq(rem_u(curr, "8"), "7")
-        isEnd = eq(curr, end)
-        shouldPrintAscii = or(isEndOfLine, isEnd)
+        // Specifically escape the newline character
+        isNewline = eq(c, "10")
+        if(isNewline)
+            putchar("92")  // ASCII '\'
+            putchar("110") // ASCII 'n'
+        else()
+            // Check if character is printable (>= 32 and < 127)
+            isPrintable1 = ge_u(c, "32")
+            isPrintable2 = lt_u(c, "127")
+            isPrintable = and(isPrintable1, isPrintable2)
 
-        if(shouldPrintAscii)
-            printString(' | ')
-
-            p = line_start
-            loop()
-                c = load8_u(p)
-                
-                isPrintable1 = ge_u(c, "32")
-                isPrintable2 = lt_u(c, "127")
-                isPrintable = and(isPrintable1, isPrintable2)
-
-                if(isPrintable)
-                    putchar(c)
-                else()
-                    putchar("46") 
-                end()
-
-                notPEnd = ne(p, curr)
-                if(notPEnd)
-                    p = add(p, "1")
-                    br 1() // FIX: Depth 1 targets the loop, Depth 0 targets the if!
-                end()
+            if(isPrintable)
+                putchar(c)
+            else()
+                putchar("46") // ASCII '.' for other unprintables
             end()
-
-            line_start = add(curr, "1")
         end()
 
+        printString(') ')
+
+        // Terminate if we reached the end
+        isEnd = eq(curr, end)
         if(isEnd)
             printString('\n')
             return()
         end()
 
+        // Move to next byte
         curr = add(curr, "1")
-        br 0() // Here br 0() works because it is NOT inside an if!
+        br 0()
     end()
-    
 
 export printInt i32 n
   cond = gt_u(n, "9")
