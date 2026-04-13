@@ -15,28 +15,59 @@ export printString i32 ptr
   end()
 
 export printMemory i32 start i32 end 
-    if(ne(rem_u(start, "8"), "0"))
-      printString('\n')
-      printInt(start)
-      printString(': ')
-    end()
-    loop () 
-        char = load8_u(start)
-        if (eqz(rem_u(start, "8"))
+
+    curr = start
+    line_start = start
+
+    loop()
+        if(eq(curr, line_start))
             printString('\n')
-            printInt(start)
-            printString(':')
+            printInt(curr)
+            printString(': ')
         end()
-        printInt(char)
-        
+
+        c = load8_u(curr)
+        printInt(c)
         printString(' ')
-        isEnd = eq(start, end) 
-        if(isEnd) 
+
+        isEndOfLine = eq(rem_u(curr, "8"), "7")
+        isEnd = eq(curr, end)
+        shouldPrintAscii = or(isEndOfLine, isEnd)
+
+        if(shouldPrintAscii)
+            printString(' | ')
+
+            p = line_start
+            loop()
+                c = load8_u(p)
+                
+                isPrintable1 = ge_u(c, "32")
+                isPrintable2 = lt_u(c, "127")
+                isPrintable = and(isPrintable1, isPrintable2)
+
+                if(isPrintable)
+                    putchar(c)
+                else()
+                    putchar("46") 
+                end()
+
+                notPEnd = ne(p, curr)
+                if(notPEnd)
+                    p = add(p, "1")
+                    br 1() // FIX: Depth 1 targets the loop, Depth 0 targets the if!
+                end()
+            end()
+
+            line_start = add(curr, "1")
+        end()
+
+        if(isEnd)
             printString('\n')
-            return() 
-        end() 
-        start = add(start, "1") 
-        br 0() 
+            return()
+        end()
+
+        curr = add(curr, "1")
+        br 0() // Here br 0() works because it is NOT inside an if!
     end()
     
 
