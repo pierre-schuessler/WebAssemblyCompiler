@@ -1000,13 +1000,19 @@ function hoistStringLiterals(lines) {
     for (let i = 0; i < str.length; i++) {
       if (str[i] === '\\' && i + 1 < str.length) {
         const esc = str[++i];
-        if      (esc === 'n')  bytes.push(10);
-        else if (esc === 'r')  bytes.push(13);
-        else if (esc === 't')  bytes.push(9);
-        else if (esc === '0')  bytes.push(0);
-        else if (esc === '\\') bytes.push(92);
-        else if (esc === '"')  bytes.push(34);
-        else bytes.push(esc.charCodeAt(0));
+        switch (esc) {
+          case 'n':  bytes.push(10); break;
+          case 'r':  bytes.push(13); break;
+          case 't':  bytes.push(9); break;
+          case '0':  bytes.push(0); break;
+          case '\\': bytes.push(92); break;
+          case '"':  bytes.push(34); break;
+          case "'":  bytes.push(39); break; // Single quote
+          default:
+            // Note: Full completeness would require checking if 'esc' is 'x' or 'u' 
+            // here and parsing the subsequent numbers for hex/unicode escapes.
+            bytes.push(esc.charCodeAt(0));
+        }
       } else {
         bytes.push(str.charCodeAt(i));
       }
