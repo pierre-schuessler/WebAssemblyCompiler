@@ -311,6 +311,7 @@ function renderProgList() {
       } else {
         loadAdminProg(el.dataset.name);
       }
+      editor.refresh()
     });
   });
 
