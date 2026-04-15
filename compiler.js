@@ -1105,14 +1105,16 @@ function preprocess(code, libs = {}) {
     .filter((l) => l.length > 0);
   
   lines = resolveIncludes(lines, libs);
-
+  
+  lines = liminaryResolve(lines);
+  
   lines = lines
     .map((l) => l.replace(/\/\/.*$/, "").trim())
     .filter((l) => l.length > 0);
   
     console.log("input: ", code)
 
-  lines = liminaryResolve(lines);
+  
 
   lines = hoistStringLiterals(lines);
 
