@@ -183,6 +183,11 @@ function resolveIncludes(lines, libs = {}) {
   return out;
 }
 
+function liminaryResolve(lines){
+  lines.replace("}", "\nend()");
+  return lines;
+}
+
 function flatten(line, tempStart = 0) {
   let output = [];
   let tempIndex = tempStart;
