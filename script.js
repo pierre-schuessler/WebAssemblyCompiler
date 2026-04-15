@@ -1,5 +1,12 @@
 import { compile, test } from "./compiler.js";
 
+import { initEditor } from "./editor.js";
+
+const editor = initEditor(
+  document.getElementById("code"),
+  document.getElementById("editorWrap")
+);
+
 
 function makeResizable(handleId, panelId, minW, maxW, storageKey) {
   const handle = document.getElementById(handleId);
