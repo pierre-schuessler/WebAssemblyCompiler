@@ -174,6 +174,7 @@ const KIND_COLOR = {
   string:  "var(--hl-string, #c3e88d)",
   comment: "var(--hl-comment,#546e7a)",
   punct:   "var(--hl-punct,  #ffcb6b)",
+  default: "var(--hl-default, white)"
 };
 
 function escHtml(s) {
@@ -188,7 +189,7 @@ function highlightCode(code) {
         .map(({ text, kind }) => {
           const color = KIND_COLOR[kind];
           const safe = escHtml(text);
-          return color ? `<span style="color:${color}">${safe}</span>` : safe;
+          return color ? `<span style="color:${color}">${safe}</span>` : `<span style="${KIND_COLOR.default}">${safe}</span>`;
         })
         .join("")
     )
