@@ -7,6 +7,8 @@ const editor = initEditor(
   document.getElementById("editorWrap")
 );
 
+editor.refresh()
+
 
 function makeResizable(handleId, panelId, minW, maxW, storageKey) {
   const handle = document.getElementById(handleId);
