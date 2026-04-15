@@ -183,9 +183,8 @@ function resolveIncludes(lines, libs = {}) {
   return out;
 }
 
-function liminaryResolve(lines){
-  lines = lines.map((l)=>{l.replace("}", "\nend()")});
-  return lines;
+function liminaryResolve(lines) {
+  return lines.map(l => l.replace(/\}/g, "\nend()"));
 }
 
 function flatten(line, tempStart = 0) {
