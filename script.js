@@ -306,12 +306,12 @@ function renderProgList() {
   list.innerHTML = html;
 
   list.querySelectorAll(".prog-file-item").forEach((el) => {
-    el.addEventListener("click", (e) => {
+    el.addEventListener("click", async (e) => {
       if (e.target.classList.contains("prog-del-btn")) return;
       if (el.dataset.user === "1") {
         loadUserProg(Number(el.dataset.idx));
       } else {
-        loadAdminProg(el.dataset.name);
+        await loadAdminProg(el.dataset.name);
       }
       editor.refresh()
     });
