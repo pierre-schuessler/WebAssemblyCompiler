@@ -351,6 +351,7 @@ export function initEditor(textarea, wrapEl) {
   }
 
   function refresh() {
+    console.log("Refreshed the editor")
     overlay.innerHTML = highlightCode(textarea.value) + "\n";
     syncScroll();
   }
