@@ -184,7 +184,7 @@ function resolveIncludes(lines, libs = {}) {
 }
 
 function liminaryResolve(lines){
-  lines.map((l)=>{l.replace("}", "\nend()")});
+  lines = lines.map((l)=>{l.replace("}", "\nend()")});
   return lines;
 }
 
