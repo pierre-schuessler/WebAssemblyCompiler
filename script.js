@@ -374,6 +374,7 @@ function autoSaveCurrentProg() {
   if (!activeProg || !activeProg.isUser) return;
   if (activeProg.idx >= userProgs.length) return;
   userProgs[activeProg.idx].code = document.getElementById("code").value;
+  editor.refresh()
   try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
 }
 
