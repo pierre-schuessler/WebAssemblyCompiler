@@ -126,7 +126,7 @@ function tokenizeLine(line) {
     }
 
     // Punctuation
-    if ("()=><,".includes(ch)) {
+    if ("(){}=><,".includes(ch)) {
       // Treat => as a single token
       if (ch === "=" && line[i + 1] === ">") {
         tokens.push({ text: "=>", kind: "punct" });
