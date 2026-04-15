@@ -167,14 +167,14 @@ function tokenizeLine(line) {
 
 // Color palette uses CSS custom properties so the host page can override them.
 const KIND_COLOR = {
-  keyword: "var(--hl-keyword, #c792ea)",
-  type:    "var(--hl-type,    #82aaff)",
-  instr:   "var(--hl-instr,  #89ddff)",
-  number:  "var(--hl-number, #f78c6c)",
-  string:  "var(--hl-string, #c3e88d)",
-  comment: "var(--hl-comment,#546e7a)",
-  punct:   "var(--hl-punct,  #ffcb6b)",
-  default: "var(--hl-default, white)"
+  keyword: "#c792ea",
+  type:    "#82aaff",
+  instr:   "#89ddff",
+  number:  "#f78c6c",
+  string:  "#c3e88d",
+  comment: "#546e7a",
+  punct:   "#ffcb6b",
+  default: "#ffffff"
 };
 
 function escHtml(s) {
