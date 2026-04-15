@@ -1112,7 +1112,7 @@ function preprocess(code, libs = {}) {
   
     console.log("input: ", code)
 
-  
+  lines = liminaryResolve(lines);
 
   lines = hoistStringLiterals(lines);
 
