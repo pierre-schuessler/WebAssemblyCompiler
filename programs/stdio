@@ -2,27 +2,27 @@ memory 1
 import env.putchar putchar i32
 
 export printString i32 ptr
-  loop()
+  loop(){
     char = load8_u(ptr)
     isEnd = eqz(char)
-    if(isEnd)
+    if(isEnd){
       return()
-    end()
+    }
     
     putchar(char)
     ptr = add(ptr, "1")
     br 0()
-  end()
+  }
 
 export MemPrintf
     addr = "0"
     n = "0"
 
-    loop()
+    loop(){
         size = load(addr)
-        if(eqz(size))
+        if(eqz(size)){
             return()
-        end()
+        }
 
         busy = load8_u(add(addr, "4"))
 
@@ -39,17 +39,17 @@ export MemPrintf
         p_end = add(p, size)
 
         // PASS 1: Print all ASCII characters
-        block()
-            loop()
+        block(){
+            loop(){
                 isDone = eq(p, p_end)
-                if(isDone)
+                if(isDone){
                     br 2() // Break out of ASCII loop
-                end()
+                }
 
                 c = load8_u(p)
                 
                 isNewline = eq(c, "10")
-                if(isNewline)
+                if(isNewline){
                     putchar("92")  // '\'
                     putchar("110") // 'n'
                 else()
@@ -57,17 +57,17 @@ export MemPrintf
                     isPrintable2 = lt_u(c, "127")
                     isPrintable = and(isPrintable1, isPrintable2)
 
-                    if(isPrintable)
+                    if(isPrintable){
                         putchar(c)
                     else()
                         putchar("46") // '.'
-                    end()
-                end()
+                    }
 
                 p = add(p, "1")
                 br 0()
-            end()
-        end()
+                }
+            }
+        }
 
         // Separator between ASCII and Integers
         printString('  [ ')
@@ -76,13 +76,13 @@ export MemPrintf
         p = add(addr, "5")
 
         // PASS 2: Print all Integer values
-        block()
-            loop()
+        block(){
+            loop(){
                 isDone = eq(p, p_end)
-                if(isDone)
+                if(isDone){
                     printString(']\n') // Close the bracket and newline
                     br 2() // Break out of Integer loop
-                end()
+                }
 
                 c = load8_u(p)
                 printInt(c)
@@ -90,25 +90,25 @@ export MemPrintf
 
                 p = add(p, "1")
                 br 0()
-            end()
-        end()
+            }
+        }
 
         // Move to the next memory block
         addr = add(addr, add(size, "5"))
         n = add(n, "1")
         br 0()
-    end()
+    }
 
 export printMemory i32 start i32 end 
     curr = start
 
-    loop()
+    loop(){
         // Print newline and address at the beginning of a line (every 8 bytes)
-        if (eqz(rem_u(curr, "8")))
+        if (eqz(rem_u(curr, "8"))){
             printString('\n')
             printInt(curr)
             printString(': ')
-        end()
+        }
 
         // Load the byte and print its integer value
         c = load8_u(curr)
@@ -117,7 +117,7 @@ export printMemory i32 start i32 end
 
         // Specifically escape the newline character
         isNewline = eq(c, "10")
-        if(isNewline)
+        if(isNewline){
             putchar("92")  // ASCII '\'
             putchar("110") // ASCII 'n'
         else()
@@ -126,33 +126,33 @@ export printMemory i32 start i32 end
             isPrintable2 = lt_u(c, "127")
             isPrintable = and(isPrintable1, isPrintable2)
 
-            if(isPrintable)
+            if(isPrintable){
                 putchar(c)
             else()
                 putchar("46") // ASCII '.' for other unprintables
-            end()
-        end()
+            }
+        }
 
         printString(') ')
 
         // Terminate if we reached the end
         isEnd = eq(curr, end)
-        if(isEnd)
+        if(isEnd){
             printString('\n')
             return()
-        end()
+        }
 
         // Move to next byte
         curr = add(curr, "1")
         br 0()
-    end()
+    }
 
 export printInt i32 n
   cond = gt_u(n, "9")
-  if(cond)
+  if(cond){
     next_n = div_u(n, "10")
     printInt(next_n)
-  end()
+  }
   
   digit = rem_u(n, "10")
   char = add(digit, "48")
@@ -160,10 +160,10 @@ export printInt i32 n
 
 export printInt64 i64 n
   cond = gt_u(n, 64"9")
-  if(cond)
+  if(cond){
     next_n = div_u(n, 64"10")
     printInt64(next_n)
-  end()
+  }
   
   digit = rem_u(n, 64"10")
   char = add(digit, 64"48")

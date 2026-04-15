@@ -8,15 +8,15 @@ export main => i32
     return("0")
 
 export printString i32 startNode
-  loop()
+  loop(){
     // 1. Load the byte from memory
     char = load8_u(startNode)
 
      // 2. Check if that character is the null terminator
     isEnd = eqz(char)
-    if(isEnd)
+    if(isEnd){
       return()
-    end()
+    }
     
     // 3. Call putchar immediately (sends the char, or 0, to JS)
     putchar(char)
@@ -24,6 +24,6 @@ export printString i32 startNode
     // 4. Increment pointer and jump back to start of loop
     startNode = add(startNode, "1")
     br 0()
-  end()
+  }
 
 

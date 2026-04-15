@@ -2,24 +2,24 @@ memory 1
 
 export malloc i32 requestSize => i32
     addr = "0"
-    loop()
+    loop(){
         size = load(addr)
-        if(eqz(size))
+        if(eqz(size)){
             store(addr, requestSize)
             store8(add(addr, "4"), "1")
             return(add(addr, "5"))
-        end()
+        }
 
-        if (ge_u(size, requestSize))
-            if(eqz(load8_u(add(addr, "4"))))
+        if (ge_u(size, requestSize)){
+            if(eqz(load8_u(add(addr, "4")))){
                 store8(add(addr, "4"), "1")
                 return(add(addr, "5"))
-            end()
-        end()
+            }
+        }
         
         addr = add(addr, add(size, "5"))
         br 0()
-    end()
+    }
     return("0")
 
 export mfree i32 ptr
