@@ -189,7 +189,7 @@ function highlightCode(code) {
         .map(({ text, kind }) => {
           const color = KIND_COLOR[kind];
           const safe = escHtml(text);
-          return color ? `<span style="color:${color}">${safe}</span>` : `<span style="${KIND_COLOR.default}">${safe}</span>`;
+          return color ? `<span style="color:${color}">${safe}</span>` : `<span style="color:${KIND_COLOR.default}">${safe}</span>`;
         })
         .join("")
     )
