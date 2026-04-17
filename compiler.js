@@ -1216,8 +1216,16 @@ export function compile(code, libs = {}) {
     switch (verb) {
 
       case "memory": {
-        const parts = words[1]?.split("-");
+        let parts;
+        let open = false;
+        if (words[1] === "open") {
+          open = true;
+          parts = words[2]?.split("-");
+        } else {
+          parts = words[1]?.split("-");
+        }
         if (!parts) break;
+
         const min = Number(parts[0]);
         const max = parts[1] != null ? Number(parts[1]) : null;
         if (isNaN(min) || min < 0) throw new Error(`Invalid memory min: '${parts[0]}'`);
@@ -1229,9 +1237,10 @@ export function compile(code, libs = {}) {
               max === null && memory.max === null
                 ? null
                 : Math.max(memory.max ?? 0, max ?? 0),
+            open: memory.open || open,
           };
         } else {
-          memory = { min, max };
+          memory = { min, max, open };
         }
         break;
       }
@@ -1421,17 +1430,31 @@ export function compile(code, libs = {}) {
     });
   }
 
-  if (exports.length) {
+  if (exports.length || memory?.open) {
     binary.push(0x07);
-    let size = encodeULEB128(exports.length).length;
+
+    const memExportName = "memory";
+    const memExportNameBytes = [...memExportName].map((c) => c.charCodeAt(0));
+    const totalExports = exports.length + (memory?.open ? 1 : 0);
+
+    let size = encodeULEB128(totalExports).length;
     exports.forEach((e, idx) => {
       size += 1 + e.name.length + 1 + encodeULEB128(idx + importFnCount).length;
     });
-    binary.push(...encodeULEB128(size), ...encodeULEB128(exports.length));
+    if (memory?.open) {
+      // name_len (1) + name bytes + kind byte (0x02) + memory index (0x00)
+      size += 1 + memExportName.length + 1 + 1;
+    }
+
+    binary.push(...encodeULEB128(size), ...encodeULEB128(totalExports));
     exports.forEach((e, idx) => {
       binary.push(e.name.length, ...[...e.name].map((c) => c.charCodeAt(0)));
       binary.push(0x00, ...encodeULEB128(idx + importFnCount));
     });
+    if (memory?.open) {
+      binary.push(memExportName.length, ...memExportNameBytes);
+      binary.push(0x02, 0x00); // kind: memory (0x02), index: 0
+    }
   }
 
   {
