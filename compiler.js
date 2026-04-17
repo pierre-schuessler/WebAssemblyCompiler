@@ -58,12 +58,14 @@ function encodeWasmInstruction(words) {
     tee:          () => [0x22, ...encodeULEB128(a)],
     "global.get": () => [0x23, ...encodeULEB128(a)],
     "global.set": () => [0x24, ...encodeULEB128(a)],
-    const: () => ({
-      f32: [0x43, ...encodeF32(a)],
-      f64: [0x44, ...encodeF64(a)],
-      i64: [0x42, ...encodeSLEB128(words[1])],
-      i32: [0x41, ...encodeSLEB128(words[1])],
-    })[type],
+    const: () => {
+      switch (type) {
+        case "f32": return [0x43, ...encodeF32(a)];
+        case "f64": return [0x44, ...encodeF64(a)];
+        case "i64": return [0x42, ...encodeSLEB128(words[1])];
+        default:    return [0x41, ...encodeSLEB128(words[1])];
+      }
+    },
     nop:          () => [0x01],
     unreachable:  () => [0x00],
     return:       () => [0x0f],
