@@ -1118,12 +1118,3 @@ body.dragging-panel .resize-handle {
 .prog-new-form.hidden {
   display: none;
 }
-
-#termInput.stdin-mode {
-  border-color: var(--yellow, #e5c07b);
-  color: var(--yellow, #e5c07b);
-}
-.c-stdin {
-  color: var(--yellow, #e5c07b);
-  font-weight: bold;
-}
