@@ -1100,6 +1100,7 @@ function hoistStringLiterals(lines) {
 }
 
 function preprocess(code, libs = {}) {
+  console.log("input: ", code)
   let lines = code
     .split("\n")
     .map((l) => l.replace(/\/\/.*$/, "").trim())
@@ -1113,7 +1114,7 @@ function preprocess(code, libs = {}) {
     .map((l) => l.replace(/\/\/.*$/, "").trim())
     .filter((l) => l.length > 0);
   
-    console.log("input: ", code)
+  console.log(lines);
 
   
 
