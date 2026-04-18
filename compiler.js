@@ -1057,7 +1057,7 @@ function hoistStringLiterals(lines) {
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     const line = lines[lineIndex];
 
-    const newLine = line.replace(/'([^']*)'/g, (_, str) => {
+    const newLine = line.replace(/'((?:[^'\\]|\\.)*)'/g, (_, str) => {
       const dataBytes = decodeString(str);
       dataBytes.push(0);
 
