@@ -559,7 +559,7 @@ function buildEnvObject() {
   // readline(addr, maxLen) → writes line into WASM memory, returns byte count
   env.readline = (addr, maxLen) => {
     const input   = window.prompt("stdin:") ?? "";
-    const line    = input + "\n";
+    const line    = input;
     const encoded = new TextEncoder().encode(line);
     const n       = Math.min(encoded.length, Math.max(0, maxLen - 1));
     const mem     = new Uint8Array(lastInstance.exports.memory.buffer);
