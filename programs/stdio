@@ -169,7 +169,7 @@ export printInt64 i64 n
   char = add(digit, 64"48")
   putchar(i32.wrap(char))
 
-export printFloat f32 n
+export printFloat f32 n i32 precision
   // Handle negative numbers
   isNeg = lt(n, "0.0")
   if(isNeg){
@@ -188,8 +188,9 @@ export printFloat f32 n
   float_int_part = f32.convert_s_i32(int_part) // Maps to f32.convert_i32_s
   frac_part = sub(n, float_int_part)
 
-  // Set fixed precision for decimal places (e.g., 6 places)
-  precision = "6"
+  if(ne("0", add(le_s(precision, "0"), ne(precision, precision)))){
+        precision = "2"
+   }
   
   loop(){
     isDone = eqz(precision)
