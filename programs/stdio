@@ -148,15 +148,7 @@ export printMemory i32 start i32 end
     }
 
 export printInt i32 n
-  cond = gt_u(n, "9")
-  if(cond){
-    next_n = div_u(n, "10")
-    printInt(next_n)
-  }
-  
-  digit = rem_u(n, "10")
-  char = add(digit, "48")
-  putchar(char)
+  printInt64(i64.extend_u(n))
 
 export printInt64 i64 n
   cond = gt_u(n, 64"9")
@@ -170,22 +162,26 @@ export printInt64 i64 n
   putchar(i32.wrap(char))
 
 export printFloat f32 n i32 precision
+  printFloat64(f64.promote(n), precision)
+
+
+export printFloat64 f64 n i32 precision
   // Handle negative numbers
-  isNeg = lt(n, "0.0")
+  isNeg = lt(n, 64"0.0")
   if(isNeg){
     putchar("45") // ASCII '-'
-    n = sub("0.0", n) // Convert to absolute value
+    n = sub(64"0.0", n) // Convert to absolute value
   }
 
   // Extract and print the integer part
-  int_part = i32.trunc_s_f32(n) // Maps to i32.trunc_f32_s
-  printInt(int_part)
+  int_part = i64.trunc_s_f64(n) // Maps to i32.trunc_f32_s
+  printInt64(int_part)
 
   // Print the decimal point
   putchar("46") // ASCII '.'
 
   // Extract the fractional part
-  float_int_part = f32.convert_s_i32(int_part) // Maps to f32.convert_i32_s
+  float_int_part = f64.convert_s_i64(int_part) // Maps to f32.convert_i32_s
   frac_part = sub(n, float_int_part)
 
   if(ne("0", add(le_s(precision, "0"), ne(precision, precision)))){
@@ -199,17 +195,17 @@ export printFloat f32 n i32 precision
     }
     
     // Multiply by 10 to shift the next decimal digit to the integer position
-    frac_part = mul(frac_part, "10.0")
+    frac_part = mul(frac_part, 64"10.0")
     
     // Extract the digit as an integer
-    digit = i32.trunc_s_f32(frac_part)
+    digit = i32.trunc_s_f64(frac_part)
     
     // Convert to ASCII and print
     char = add(digit, "48") 
     putchar(char)
     
     // Convert the digit back to float and subtract it to isolate the remaining fraction
-    digit_float = f32.convert_s_i32    (digit)
+    digit_float = f64.convert_s_i32    (digit)
     frac_part = sub(frac_part, digit_float)
     
     // Decrement precision counter
