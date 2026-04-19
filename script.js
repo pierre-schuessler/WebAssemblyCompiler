@@ -434,20 +434,6 @@ let envImports = [
     body: "return Math.pow(a, b)|0;",
   },
   { name: "log", sig: "i32 => i32", body: "console.log(a); return a;" },
-  { name: "putchar", sig: "i32", body: `console.stdout(String.fromCharCode(a));` },
-
-  // ── stdin ──────────────────────────────────────────────────────────────
-  {
-    name: "readline",
-    sig: "i32 i32 => i32",
-    body: `var input = window.prompt("stdin:") ?? "";
-var encoded = new TextEncoder().encode(input);
-var n = Math.min(encoded.length, Math.max(0, b - 1));
-var mem = new Uint8Array(lastInstance.exports.memory.buffer);
-mem.set(encoded.subarray(0, n), a);
-mem[a + n] = 0;
-return n;`,
-  },
 ];
 let editingIdx = null;
 
@@ -555,6 +541,8 @@ function buildEnvObject() {
   const env = {}, argNames = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
   // ── stdin built-ins ──────────────────────────────────────────────────────
+
+  env.putchar = (a)=>{console.stdout(String.fromCharCode(a));}
 
   // readline(addr, maxLen) → writes line into WASM memory, returns byte count
   env.readline = (addr, maxLen) => {
