@@ -7,28 +7,23 @@ export fib i32 n => i32
   b = "1"
   i = "0"
   
-  block(){
-    loop(){
-      
-      cond = ge_s(i, n)
-      if(cond){
-        br 2()
-      }
-      
-      
-      next_val = add(a, b)
-      
-      
-      a = b
-      b = next_val
-      
-      
-      i = add(i, "1")
-      br 0()
+  loop(){
+    
+    cond = ge_s(i, n)
+    if(cond){
+      return(a)
     }
+    
+    next_val = add(a, b)
+    
+    a = b
+    b = next_val
+    
+    i = add(i, "1")
+    br 0()
   }
-  
-  return(a)
+  return("0")
+
 
 export main i32 input => i32
   
