@@ -168,3 +168,50 @@ export printInt64 i64 n
   digit = rem_u(n, 64"10")
   char = add(digit, 64"48")
   putchar(i32.wrap(char))
+
+export printFloat f32 n
+  // Handle negative numbers
+  isNeg = lt(n, "0.0")
+  if(isNeg){
+    putchar("45") // ASCII '-'
+    n = sub("0.0", n) // Convert to absolute value
+  }
+
+  // Extract and print the integer part
+  int_part = i32.trunc_s_f32(n) // Maps to i32.trunc_f32_s
+  printInt(int_part)
+
+  // Print the decimal point
+  putchar("46") // ASCII '.'
+
+  // Extract the fractional part
+  float_int_part = f32.convert_s_i32(int_part) // Maps to f32.convert_i32_s
+  frac_part = sub(n, float_int_part)
+
+  // Set fixed precision for decimal places (e.g., 6 places)
+  precision = "6"
+  
+  loop(){
+    isDone = eqz(precision)
+    if(isDone){
+      return()
+    }
+    
+    // Multiply by 10 to shift the next decimal digit to the integer position
+    frac_part = mul(frac_part, "10.0")
+    
+    // Extract the digit as an integer
+    digit = i32.trunc_s_f32(frac_part)
+    
+    // Convert to ASCII and print
+    char = add(digit, "48") 
+    putchar(char)
+    
+    // Convert the digit back to float and subtract it to isolate the remaining fraction
+    digit_float = f32.convert_s_i32    (digit)
+    frac_part = sub(frac_part, digit_float)
+    
+    // Decrement precision counter
+    precision = sub(precision, "1")
+    br 0()
+  }
