@@ -39,3 +39,21 @@ export get_counter => i32 // gets the value of the global counter without changi
 export print_A // prints the letter 'A' (ascii code 65) and triggers rendering with '\0' (ascii code 0)
     putchar("65")
     putchar("0")
+
+export triangular_number i32 n => i32
+    if (eqz(n)){
+        return("0")
+    }
+    i = "0"
+    a = "0"
+
+    loop(){
+        i = add(i, "1")
+
+        a = add(a, i)
+
+        if (eqz(eq(i, n))){
+            br 1()
+        }
+    }
+    return (a)
