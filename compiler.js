@@ -689,9 +689,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       output.push(globalNames.has(dest) ? `global.set ${dest}` : `set $${dest}`);
       continue;
     }
-    else{
-      console.error("CopyM was not found");
-    }
 
     const multiVarCallM = t.match(/^((?:\w+\s+\w+)(?:,\s*(?:\w+\s+\w+))*)\s*=\s*callfn\s+(\d+)\((.*)\)$/);
     if (multiVarCallM) {
