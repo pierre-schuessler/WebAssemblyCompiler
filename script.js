@@ -235,6 +235,7 @@ const PROG_SECTIONS = [
     label: "Simple programs",
     files: [
       { id: "fibonacci",      name: "Fibonacci" },
+      { id: "pi_approx",      name: "Approximation for pi" },
     ]
   },
   {

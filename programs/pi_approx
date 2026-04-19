@@ -1,0 +1,51 @@
+export approximate_pi f64 resolution => f64
+    if (le(resolution, 64"0.0")){
+        return(64"0.0")
+    }
+
+    // step size = 2.0 / resolution
+    step   = div(64"2.0", resolution)
+    
+    y_idx  = 64"0.0"
+    inside = 64"0.0"
+    total  = 64"0.0"
+
+    loop(){
+        // y = -1.0 + (y_idx * step)
+        y = add(64"-1.0", mul(y_idx, step))
+        
+        x_idx = 64"0.0"
+
+        loop(){
+            // x = -1.0 + (x_idx * step)
+            x = add(64"-1.0", mul(x_idx, step))
+            
+            total = add(total, 64"1.0")
+
+            // dist_sq = (x * x) + (y * y)
+            dist_sq = add(mul(x, x), mul(y, y))
+
+            // if distance squared <= 1.0, it's inside the circle
+            if (le(dist_sq, 64"1.0")){
+                inside = add(inside, 64"1.0")
+            }
+
+            x_idx = add(x_idx, 64"1.0")
+
+            // if x_idx < resolution, continue inner loop
+            if (lt(x_idx, resolution)){
+                br 1()
+            }
+        }
+
+        y_idx = add(y_idx, 64"1.0")
+
+        // if y_idx < resolution, continue outer loop
+        if (lt(y_idx, resolution)){
+            br 1()
+        }
+    }
+
+    // pi = 4.0 * (inside / total)
+    pi = mul(64"4.0", div(inside, total))
+    return(pi)
