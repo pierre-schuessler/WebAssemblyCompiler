@@ -1,4 +1,4 @@
-export approximate_pi f64 resolution => f64
+export pi f64 resolution => f64
     if(ne("0", add(le(resolution, 64"0.0"), ne(resolution, resolution)))){
         resolution = 64"1000.0"
     }
