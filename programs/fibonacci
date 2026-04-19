@@ -1,5 +1,3 @@
-memory 1
-
 #include <stdio>
 
 export fib i32 n => i32
@@ -8,22 +6,23 @@ export fib i32 n => i32
   i = "0"
   
   loop(){
+    cond = lt_s(i, n)
     
-    cond = ge_s(i, n)
     if(cond){
-      return(a)
+      
+      next_val = add(a, b)
+      a = b
+      b = next_val
+      
+      
+      i = add(i, "1")
+      
+      
+      br 1()
     }
-    
-    next_val = add(a, b)
-    
-    a = b
-    b = next_val
-    
-    i = add(i, "1")
-    br 0()
   }
-  return("0")
-
+  
+  return(a)
 
 export main i32 input => i32
   
