@@ -276,7 +276,7 @@ function flatten(line, tempStart = 0) {
 
     if (closeIdx !== e.length - 1) {
       const trailing = e.slice(closeIdx + 1).trim();
-      if (trailing !== "")
+      if (trailing !== "" && trailing != "{")
         throw new PreprocessError(
           `Unexpected trailing tokens after closing ')': '${trailing}'`,
           "flatten", line
