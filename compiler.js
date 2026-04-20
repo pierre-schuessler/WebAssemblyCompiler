@@ -1474,6 +1474,7 @@ function preprocess(code, libs = {}) {
     );
 
   lines = resolveIncludes(lines, libs);
+  console.log("before liminary: ", lines);
   lines = liminaryResolve(lines);
   lines = lines.map(l => l.replace(/\/\/.*$/, "").trim()).filter(l => l.length > 0);
   console.log("after liminary:", lines);
