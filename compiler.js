@@ -1533,7 +1533,6 @@ export {
 };
 
 export function compile(code, libs = {}) {
-  console.log(code, libs)
   const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
   let types       = [],
       functions   = [],

@@ -655,9 +655,7 @@ function appendToPrint(text) {
 async function gatherLibs(code) {
   const libs = {};
   for (const line of code.split("\n")) {
-    console.log(line)
-    const m = line.match(/^\s*#include\s+<([^>]+)>\s*$/);
-    console.log(m)
+    const m = line.match(/^\s*#include\s+<([^>]+)>\s*(?:\/\/.*)?$/);
     if (!m) continue;
     const name = m[1].trim();
     if (name in libs) continue;
@@ -724,7 +722,6 @@ async function runCommand(raw, isInternal = false) {
 
     try {
       const libs = await gatherLibs(code);
-      console.log(libs)
       const binary = compile(code, libs);
       if (!binary) throw new Error("compile() returned null");
 
