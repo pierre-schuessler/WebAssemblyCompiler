@@ -1,12 +1,12 @@
-#include <stdio>
+#include <stdio> // include the stdio library to print values
 
-export fib i32 n => i32
+export fib i32 n => i32 // export a function called fib that takes an i32 and returns a i32
   a = "0"
   b = "1"
   i = "0"
   
   loop(){
-    cond = lt_s(i, n)
+    cond = lt_s(i, n) // check if (i < n)
     
     if(cond){
       
@@ -18,13 +18,13 @@ export fib i32 n => i32
       i = add(i, "1")
       
       
-      br 1()
+      br 1() // go back to the start of the loop
     }
   }
   
-  return(a)
+  return(a) // return the result
 
-export main i32 input => i32
+export main i32 input => i32 // export the main function
   
   printString('The ')
   printInt(input)
@@ -34,4 +34,4 @@ export main i32 input => i32
   printInt(ans)
   printString('.')
 
-  return("0")
+  return("0") // return "0" to represent success

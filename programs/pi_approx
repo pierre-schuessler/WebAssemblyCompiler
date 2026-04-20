@@ -1,5 +1,5 @@
 export pi_v1 f64 resolution => f64
-    if(ne("0", add(le(resolution, 64"0.0"), ne(resolution, resolution)))){
+    if(ne("0", add(le(resolution, 64"0.0"), ne(resolution, resolution)))){ // check if resolution is 0 or NaN
         resolution = 64"1000.0"
     }
     // step size = 2.0 / resolution

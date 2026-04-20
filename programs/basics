@@ -39,20 +39,20 @@ export get_counter => i32 // gets the value of the global counter without changi
 export print_A // prints the letter 'A' (ascii code 65)
     putchar("65")
 
-export triangular_number i32 n => i32
-    if (eqz(n)){
+export triangular_number i32 n => i32 // compute 1 + 2 + 3 + ... + n
+    if (eqz(n)){ // if n = 0, just stop right there
         return("0")
     }
     i = "0"
     a = "0"
 
     loop(){
-        i = add(i, "1")
+        i = add(i, "1") // increment i
 
-        a = add(a, i)
+        a = add(a, i) // add i to a
 
-        if (eqz(eq(i, n))){
-            br 1()
+        if (eqz(eq(i, n))){ // if (i != n)
+            br 1() // branch back to the start of the loop (line 49)
         }
     }
-    return (a)
+    return (a) // return the result
