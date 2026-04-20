@@ -722,6 +722,7 @@ async function runCommand(raw, isInternal = false) {
 
     try {
       const libs = await gatherLibs(code);
+      console.log(libs)
       const binary = compile(code, libs);
       if (!binary) throw new Error("compile() returned null");
 
