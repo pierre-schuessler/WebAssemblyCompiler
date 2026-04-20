@@ -827,6 +827,8 @@ function inferWasmTypes(lines, registry = {}) {
 
     const voidM = t.match(/^([\w.]+)\s*\((.*)\)\s*$/);
     if (voidM) {
+      if (voidM[1] === 'return') return line;
+
       const entry    = registry[voidM[1]];
       const args     = voidM[2] ? voidM[2].split(',').map(a => a.trim()).filter(a => a) : [];
 
