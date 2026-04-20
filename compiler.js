@@ -200,8 +200,7 @@ function resolveIncludes(lines, libs = {}) {
     const m = line.match(/^#include\s+<([^>]+)>$/);
     if (!m) { out.push(line); continue; }
     const name = m[1].trim();
-    if (!(name in libs))
-      throw new PreprocessError(`Library not found: <${name}>`, "resolveIncludes", line);
+    if (!(name in libs)) throw new PreprocessError(`Library not found: <${name}>\nKnown libraries: ${Object.keys(libs).join(", ")}`, "resolveIncludes", line);
     out.push(
       ...libs[name].split("\n")
         .map(l => l.replace(/\/\/.*$/, "").trim())
