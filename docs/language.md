@@ -278,15 +278,15 @@ block() {
 
 ```
 if(<condition>) {
-else
+
+} else(){
+
 }
 ```
 
-`if` takes an `i32` condition variable as its argument. If the condition is zero, execution jumps to the matching `else` or `}`.
+`if` takes an `i32` condition variable as its argument. If the condition is zero, execution jumps to the matching `else` or moves out of the block.
 
-`else` is optional. `}` closes the nearest open `block`, `loop`, or `if`.
-
-The opening `{` is ignored by the compiler but is standard practice for readability.
+`} else() {` is optional. `}` closes the nearest open `block`, `loop`, or `if`.
 
 ```
 export clamp i32 x => i32
@@ -294,7 +294,7 @@ export clamp i32 x => i32
   too_high = gt_s(x, "100")
   if(too_low) {
     x = "0"
-  } else {
+  } else() {
     if(too_high) {
       x = "100"
     }
@@ -356,7 +356,7 @@ block() {
     cond = lt_s(counter, "10")
     if(cond) {
       counter = add(counter, "1")
-    } else {
+    } else() {
       br("2")       // exit outer block
     }
     br("0")         // repeat loop
