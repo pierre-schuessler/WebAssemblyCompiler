@@ -25,13 +25,18 @@ If the named library is not registered with the compiler, an error is thrown at 
 
 ```
 memory <min>[-<max>]
+memory open <min>[-<max>]
 ```
 
 Declares a linear memory. Sizes are in **pages** (1 page = 64 KB). At most one `memory` directive is allowed per module.
 
+The optional `open` keyword exports the memory under the name `"memory"`, making it accessible to the host environment (e.g. JavaScript).
+
 ```
-memory 1        // 1 page, no maximum
-memory 1-16     // 1 page minimum, 16 page maximum
+memory 1           // 1 page, no maximum
+memory 1-16        // 1 page minimum, 16 page maximum
+memory open 1      // 1 page, exported to host
+memory open 1-16   // 1 page minimum, 16 page maximum, exported
 ```
 
 ---
@@ -39,15 +44,25 @@ memory 1-16     // 1 page minimum, 16 page maximum
 ### `import`
 
 ```
-import <module>.<n> <localAlias> [<paramType> ...] => [<returnType>]
+import <module>.<n> <localAlias> [<paramType> ...] => [<returnType> ...]
 ```
 
-Declares an external function the module can call. `<module>.<n>` is the import path (e.g. `env.log`). `<localAlias>` is the name used to call it inside function bodies. Parameter types and return type follow the same convention as `export`. Imports with no return value omit the `=>` clause entirely.
+Declares an external function the module can call. `<module>.<n>` is the import path (e.g. `env.log`). `<localAlias>` is the name used to call it inside function bodies. Parameter types and return types follow the same convention as `export`. Imports with no return value omit the `=>` clause entirely.
+
+Multiple return types are supported. When calling a multi-return import, list the destination variables on the left-hand side separated by commas.
 
 ```
-import env.log   log   i32       => i32   // one i32 param, returns i32
-import env.print print i32               // one i32 param, no return
-import env.pow   pow   i32 i32   => i32  // two i32 params, returns i32
+import env.log   log   i32       => i32        // one i32 param, returns i32
+import env.print print i32                     // one i32 param, no return
+import env.pow   pow   i32 i32   => i32        // two i32 params, returns i32
+import env.divmod divmod i32 i32 => i32 i32    // returns two values
+```
+
+Calling a multi-return import:
+
+```
+export demo i32 a i32 b
+  q, r = divmod(a, b)    // q receives first return value, r receives second
 ```
 
 ---
@@ -141,6 +156,26 @@ pi = 64"3.14159"         // constant pi assigned (f64)
 
 ---
 
+### String literals
+
+```
+'text'
+```
+
+A single-quoted string is a **string literal**. At compile time the compiler writes the string's bytes (plus a null terminator) into linear memory and replaces the literal with the memory address of the first character as an `i32` constant. A `memory` declaration must be present.
+
+The address is placed after any existing `data` directives to avoid overlap. Each string is stored with a 4-byte little-endian length prefix, a flag byte, then the null-terminated content.
+
+```
+memory 1
+export greet
+  ptr = 'Hello, world!'   // ptr : i32, value is the memory address
+```
+
+String literals support the same escape sequences as `data` strings: `\n`, `\r`, `\t`, `\0`, `\\`, `\"`, `\'`.
+
+---
+
 ### Nested expressions
 
 Nested calls are flattened automatically into temp variables. You can write them directly without intermediate names.
@@ -172,7 +207,7 @@ export increment => i32
 
 ### Calling imported functions
 
-Call an imported function by its local alias. If the import returns a value, assign it; if it is void, write it as a bare call.
+Call an imported function by its local alias. If the import returns a single value, assign it; if it is void, write it as a bare call. For multi-return imports, list comma-separated destination variables on the left-hand side.
 
 ```
 import env.log log i32 => i32
@@ -185,6 +220,12 @@ import env.print print i32
 
 export demo2 i32 x
   print(x)               // void call — no assignment
+
+import env.divmod divmod i32 i32 => i32 i32
+
+export demo3 i32 a i32 b => i32
+  quot, rem = divmod(a, b)   // multi-return import
+  return quot
 ```
 
 ---
@@ -212,48 +253,52 @@ Control flow instructions use the same argument-passing syntax as the rest of th
 ### `block`, `loop`
 
 ```
-block()
-loop()
+block() {
+loop() {
 ```
 
-Open a structured control block. Every opened block must be closed with a matching `end`.
+Open a structured control block. Every opened block must be closed with `}`.
 
-- `block()` — a non-looping block used as a break target. Branching from inside exits to after its `end`.
-- `loop()` — a loop block. `br 0` from inside jumps back to the top.
+- `block()` — a non-looping block used as a break target. Branching from inside exits to after its `}`.
+- `loop()` — a loop block. `br(0)` from inside jumps back to the top.
+
+The opening `{` is ignored by the compiler but is standard practice for readability.
 
 ```
-block()
-  loop()
+block() {
+  loop() {
     // body
-  end
-end
+  }
+}
 ```
 
 ---
 
-### `if`, `else`, `end`
+### `if`, `else`, `}`
 
 ```
-if(<condition>)
+if(<condition>) {
 else
-end
+}
 ```
 
-`if` takes an `i32` condition variable as its argument. If the condition is zero, execution jumps to the matching `else` or `end`.
+`if` takes an `i32` condition variable as its argument. If the condition is zero, execution jumps to the matching `else` or `}`.
 
-`else` is optional. `end` closes the nearest open `block`, `loop`, or `if`.
+`else` is optional. `}` closes the nearest open `block`, `loop`, or `if`.
+
+The opening `{` is ignored by the compiler but is standard practice for readability.
 
 ```
 export clamp i32 x => i32
   too_low  = lt_s(x, "0")
   too_high = gt_s(x, "100")
-  if(too_low)
+  if(too_low) {
     x = "0"
-  else
-    if(too_high)
+  } else {
+    if(too_high) {
       x = "100"
-    end
-  end
+    }
+  }
   return x
 ```
 
@@ -262,19 +307,21 @@ export clamp i32 x => i32
 ### `br`, `br_if`
 
 ```
-br    <depth>
-br_if <depth>(<condition>)
+br(<depth>)
+br_if(<depth>, <condition>)
 ```
 
 Branch to an enclosing block at the given nesting depth (0 = innermost). For a `loop`, branching returns to the top; for a `block` or `if`, branching exits to after the `end`.
 
-`br` is unconditional and takes no arguments. `br_if` takes an `i32` condition variable and branches only if it is non-zero.
+`br` is unconditional and takes only a depth argument. `br_if` takes a depth and an `i32` condition variable, and branches only if the condition is non-zero.
 
 ```
-loop empty()
-  done = eq(x, "0")
-  br_if 1(done)    // exit loop if done (targets enclosing block)
-  br 0             // repeat loop (targets this loop)
+block()
+  loop()
+    done = eq(x, "0")
+    br_if("1", done)    // exit loop if done (targets enclosing block)
+    br("0")             // repeat loop (targets this loop)
+  end
 end
 ```
 
@@ -283,13 +330,19 @@ end
 ### `br_table`
 
 ```
-br_table <depth> [<depth> ...] <defaultDepth>
+br_table(<index>, <depth> [, <depth> ...], <defaultDepth>)
 ```
 
-Branches to the depth at position `<index>` in the list, where `<index>` is an `i32` value. If the index is out of range, branches to `<defaultDepth>`.
+Branches to the depth at position `<index>` in the list. If the index is out of range, branches to `<defaultDepth>`. `<index>` must be an `i32` variable or constant.
 
 ```
-br_table 0 1 2 3   // index 0→depth 0, 1→depth 1, 2→depth 2, else→depth 3
+block()   // depth 2
+  block() // depth 1
+    block() // depth 0
+      br_table(i, "0", "1", "2", "2")  // i=0→depth 0, i=1→depth 1, i=2→depth 2, else→depth 2
+    end
+  end
+end
 ```
 
 ---
@@ -298,23 +351,23 @@ br_table 0 1 2 3   // index 0→depth 0, 1→depth 1, 2→depth 2, else→depth 
 
 ```
 // while (counter < 10) { counter++ }
-block()
-  loop()
+block() {
+  loop() {
     cond = lt_s(counter, "10")
-    if(cond)
+    if(cond) {
       counter = add(counter, "1")
-    else
-      br 2          // exit outer block
-    end
-    br 0            // repeat loop
-  end
-end
+    } else {
+      br("2")       // exit outer block
+    }
+    br("0")         // repeat loop
+  }
+}
 ```
 
 Depth reference for `br` here:
-- `br 0` → back to top of `loop`
-- `br 1` → exit `loop` (after loop's `end`)
-- `br 2` → exit `block` (after block's `end`)
+- `br("0")` → back to top of `loop`
+- `br("1")` → exit `loop` (after loop's `end`)
+- `br("2")` → exit `block` (after block's `end`)
 
 ---
 
@@ -376,14 +429,15 @@ store i32(addr, val)       // write val to address 0
 store8 i32(addr, val)      // write low byte of val to address 0
 ```
 
-### `memory.size` / `memory.grow`
+### `memory.size` / `memory.grow` / `memory.fill`
 
 ```
 sz  = memory.size()
 old = memory.grow(n)
+memory.fill(dest, value, count)
 ```
 
-`memory.size()` returns the current size in pages as an `i32`. `memory.grow(n)` grows memory by `n` pages and returns the previous size, or `-1` on failure.
+`memory.size()` returns the current size in pages as an `i32`. `memory.grow(n)` grows memory by `n` pages and returns the previous size, or `-1` on failure. `memory.fill(dest, value, count)` fills `count` bytes starting at address `dest` with the byte `value`; all three arguments are `i32`.
 
 ---
 
@@ -400,10 +454,18 @@ Discards a value. Useful when a function returns a value that is not needed and 
 ### `select`
 
 ```
-select
+result = select(<a>, <b>, <condition>)
 ```
 
-A branchless ternary. Takes a condition (`i32`) and two operands of the same type — produces the first operand if the condition is non-zero, the second otherwise.
+A branchless ternary. Produces `<a>` if `<condition>` is non-zero, `<b>` otherwise. `<a>` and `<b>` must have the same type.
+
+### `call_indirect`
+
+```
+result = call_indirect(<tableIndex>, <arg> [...])
+```
+
+Calls a function via a function table at the given index. The type is inferred from the arguments in the same way as a regular call. This is an advanced instruction; most programs use direct calls instead.
 
 ---
 
@@ -473,24 +535,33 @@ All operations are called with the expression syntax `result = op(arg, ...)`. Ty
 
 ### Type conversions
 
-| Name | Description |
-|------|-------------|
-| `i32.wrap` | i64 → i32 (wrapping) |
-| `i64.extend_s` | i32 → i64 (sign-extend) |
-| `i64.extend_u` | i32 → i64 (zero-extend) |
-| `f32.convert_s_i32` | i32 → f32 (signed) |
-| `f32.convert_u_i32` | i32 → f32 (unsigned) |
-| `f32.convert_s_i64` | i64 → f32 (signed) |
-| `f64.convert_s_i32` | i32 → f64 (signed) |
-| `f64.convert_u_i32` | i32 → f64 (unsigned) |
-| `f64.convert_s_i64` | i64 → f64 (signed) |
-| `f64.promote` | f32 → f64 |
-| `f32.demote` | f64 → f32 |
-| `i32.trunc_s_f32` | f32 → i32 (signed trunc) |
-| `i32.trunc_u_f32` | f32 → i32 (unsigned trunc) |
-| `i32.trunc_s_f64` | f64 → i32 (signed trunc) |
-| `i32.reinterpret` | f32 → i32 (bit reinterpret) |
-| `f32.reinterpret` | i32 → f32 (bit reinterpret) |
+| Name | Input | Output | Description |
+|------|-------|--------|-------------|
+| `i32.wrap` | i64 | i32 | Wrap (truncate) to 32 bits |
+| `i32.trunc_s_f32` | f32 | i32 | Truncate to signed i32 |
+| `i32.trunc_u_f32` | f32 | i32 | Truncate to unsigned i32 |
+| `i32.trunc_s_f64` | f64 | i32 | Truncate to signed i32 |
+| `i32.trunc_u_f64` | f64 | i32 | Truncate to unsigned i32 |
+| `i32.reinterpret` | f32 | i32 | Reinterpret bits as i32 |
+| `i64.extend_s` | i32 | i64 | Sign-extend to i64 |
+| `i64.extend_u` | i32 | i64 | Zero-extend to i64 |
+| `i64.trunc_s_f32` | f32 | i64 | Truncate to signed i64 |
+| `i64.trunc_u_f32` | f32 | i64 | Truncate to unsigned i64 |
+| `i64.trunc_s_f64` | f64 | i64 | Truncate to signed i64 |
+| `i64.trunc_u_f64` | f64 | i64 | Truncate to unsigned i64 |
+| `i64.reinterpret` | f64 | i64 | Reinterpret bits as i64 |
+| `f32.convert_s_i32` | i32 | f32 | Convert signed i32 |
+| `f32.convert_u_i32` | i32 | f32 | Convert unsigned i32 |
+| `f32.convert_s_i64` | i64 | f32 | Convert signed i64 |
+| `f32.convert_u_i64` | i64 | f32 | Convert unsigned i64 |
+| `f32.demote` | f64 | f32 | Demote f64 to f32 |
+| `f32.reinterpret` | i32 | f32 | Reinterpret bits as f32 |
+| `f64.convert_s_i32` | i32 | f64 | Convert signed i32 |
+| `f64.convert_u_i32` | i32 | f64 | Convert unsigned i32 |
+| `f64.convert_s_i64` | i64 | f64 | Convert signed i64 |
+| `f64.convert_u_i64` | i64 | f64 | Convert unsigned i64 |
+| `f64.promote` | f32 | f64 | Promote f32 to f64 |
+| `f64.reinterpret` | i64 | f64 | Reinterpret bits as f64 |
 
 ---
 
