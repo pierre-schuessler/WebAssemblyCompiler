@@ -1,4 +1,4 @@
-export pi f64 resolution => f64
+export pi_v1 f64 resolution => f64
     if(ne("0", add(le(resolution, 64"0.0"), ne(resolution, resolution)))){
         resolution = 64"1000.0"
     }
@@ -47,4 +47,30 @@ export pi f64 resolution => f64
 
     // pi = 4.0 * (inside / total)
     pi = mul(64"4.0", div(inside, total))
+    return(pi)
+
+export pi_v2 i32 resolution => f64
+    i = "0"
+    pi_approx = 64"0.0"
+    sign = 64"1.0"
+    divisor = 64"1.0"
+    
+    loop(){
+        term = div(sign, divisor)
+        
+        pi_approx = add(pi_approx, term)
+        
+        sign = mul(sign, 64"-1.0")
+        
+        divisor = add(divisor, 64"2.0")
+        
+        i = add(i, "1")
+        
+        if(ne(i, resolution)){
+            br 1()
+        }
+    }
+    
+    pi = mul(pi_approx, 64"4.0")
+
     return(pi)
