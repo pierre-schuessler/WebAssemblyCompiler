@@ -212,7 +212,10 @@ function resolveIncludes(lines, libs = {}) {
 
 
 function liminaryResolve(lines) {
-  return lines.map(l => l.replace(/\}/g, "\nend()"));
+  return lines.map(l => 
+    l.replace(/}\s*else\s*\(\)\s*\{/g, "else()")
+     .replace(/\}/g, "\nend()")
+  );
 }
 
 
