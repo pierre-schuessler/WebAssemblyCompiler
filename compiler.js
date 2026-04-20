@@ -171,10 +171,6 @@ function encodeWasmInstruction(words) {
   return [Number(instr)];
 }
 
-// ─────────────────────────────────────────────
-//  Error type
-// ─────────────────────────────────────────────
-
 class PreprocessError extends Error {
   /**
    * @param {string} message   Human-readable description
@@ -193,16 +189,10 @@ class PreprocessError extends Error {
   }
 }
 
-// ─────────────────────────────────────────────
-//  Helpers used by multiple stages
-// ─────────────────────────────────────────────
 
 const VALID_TYPES    = new Set(["i32", "i64", "f32", "f64"]);
 const TYPEMAP        = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
 
-// ─────────────────────────────────────────────
-//  resolveIncludes
-// ─────────────────────────────────────────────
 
 function resolveIncludes(lines, libs = {}) {
   const out = [];
@@ -221,17 +211,11 @@ function resolveIncludes(lines, libs = {}) {
   return out;
 }
 
-// ─────────────────────────────────────────────
-//  liminaryResolve
-// ─────────────────────────────────────────────
 
 function liminaryResolve(lines) {
   return lines.map(l => l.replace(/\}/g, "\nend()"));
 }
 
-// ─────────────────────────────────────────────
-//  flatten
-// ─────────────────────────────────────────────
 
 function flatten(line, tempStart = 0) {
   let output    = [];
@@ -266,7 +250,6 @@ function flatten(line, tempStart = 0) {
 
     const parenIdx = e.indexOf("(");
     if (parenIdx === -1) {
-      // bare value / variable reference
       return (e.startsWith('"') || e.startsWith('64"') || e.startsWith("'"))
         ? e
         : `$${e}`;
@@ -279,7 +262,6 @@ function flatten(line, tempStart = 0) {
         "flatten", line
       );
 
-    // find matching closing paren
     let depth = 0, closeIdx = -1;
     for (let i = parenIdx; i < e.length; i++) {
       if      (e[i] === '(') depth++;
@@ -303,7 +285,6 @@ function flatten(line, tempStart = 0) {
 
     const inside = e.slice(parenIdx + 1, closeIdx);
 
-    // split arguments
     const args    = [];
     let d = 0, current = "", inStr = false;
     for (const c of inside) {
@@ -350,9 +331,6 @@ function flatten(line, tempStart = 0) {
   return { lines: output, nextIndex: tempIndex };
 }
 
-// ─────────────────────────────────────────────
-//  registerFunctions  (validates declarations)
-// ─────────────────────────────────────────────
 
 function registerFunctions(lines) {
   const registry = {
@@ -484,11 +462,9 @@ function registerFunctions(lines) {
   for (const line of lines) {
     const t = line.trim();
 
-    // ── import ────────────────────────────────────────────────────────────
     if (t.startsWith("import ")) {
       const tokens = t.slice(7).trim().split(/\s+/);
 
-      // At minimum: import <externalName>
       if (tokens.length < 1 || !tokens[0])
         throw new PreprocessError(
           "import declaration is missing an external name",
@@ -531,7 +507,6 @@ function registerFunctions(lines) {
       continue;
     }
 
-    // ── export ────────────────────────────────────────────────────────────
     if (t.startsWith("export ")) {
       const tokens = t.slice(7).trim().split(/\s+/);
       const fnName = tokens[0];
@@ -600,9 +575,6 @@ function registerFunctions(lines) {
   return registry;
 }
 
-// ─────────────────────────────────────────────
-//  reorder
-// ─────────────────────────────────────────────
 
 function reorder(lines) {
   const memory  = [];
@@ -628,9 +600,6 @@ function reorder(lines) {
   return [...memory, ...imports, ...globals, ...exports, ...data];
 }
 
-// ─────────────────────────────────────────────
-//  inferWasmTypes
-// ─────────────────────────────────────────────
 
 function inferWasmTypes(lines, registry = {}) {
   const globalTypeMap = {};
@@ -643,6 +612,75 @@ function inferWasmTypes(lines, registry = {}) {
   }
 
   typeMap = { ...globalTypeMap };
+
+
+  /** Return the wasm type of a single (already-flat) argument token, or null. */
+  function argType(arg) {
+    arg = arg.trim();
+    if (arg.startsWith('$'))   return typeMap[arg.slice(1)] ?? null;
+    if (arg.startsWith('64"')) {
+      const v = arg.replace(/^64"|"$/g, '');
+      return (v.includes('.') || /[eE]/.test(v)) ? 'f64' : 'i64';
+    }
+    if (arg.startsWith('"')) {
+      const v = arg.replace(/^"|"$/g, '');
+      return (v.includes('.') || /[eE]/.test(v)) ? 'f32' : 'i32';
+    }
+    return null;
+  }
+
+  /**
+   * Verify each argument's resolved type matches the corresponding expected
+   * type.  Skips positions where either side is unknown.
+   */
+  function checkInputTypes(args, expectedTypes, opName, line) {
+    args.forEach((arg, i) => {
+      const expected = expectedTypes[i];
+      if (!expected) return;
+      const actual = argType(arg);
+      if (actual && actual !== expected)
+        throw new PreprocessError(
+          `Argument ${i + 1} of '${opName}' is type '${actual}' but '${expected}' is expected`,
+          "inferWasmTypes", line
+        );
+    });
+  }
+
+  /**
+   * For built-in ops that carry a validTypes list, verify that the resolved
+   * opType is actually supported and that every variable argument agrees with
+   * that type.
+   */
+  function checkBuiltinTypes(args, opName, opType, validTypes, line) {
+    if (validTypes && !validTypes.includes(opType))
+      throw new PreprocessError(
+        `'${opName}' does not support type '${opType}' (supported: ${validTypes.join(', ')})`,
+        "inferWasmTypes", line
+      );
+
+    args.forEach((arg, i) => {
+      const actual = argType(arg);
+      if (actual && actual !== opType)
+        throw new PreprocessError(
+          `Argument ${i + 1} of '${opName}' is type '${actual}' but '${opType}' is expected`,
+          "inferWasmTypes", line
+        );
+    });
+  }
+
+  /**
+   * If a destination variable is already typed, ensure the incoming type
+   * matches.  Otherwise just record it.
+   */
+  function checkOutputType(varName, resultType, opName, line) {
+    const existing = typeMap[varName];
+    if (existing && existing !== resultType)
+      throw new PreprocessError(
+        `Cannot assign '${resultType}' result of '${opName}' to '${varName}' which is type '${existing}'`,
+        "inferWasmTypes", line
+      );
+  }
+
 
   function resolveTypes(operation, argsStr, line) {
     const entry       = registry[operation];
@@ -674,11 +712,11 @@ function inferWasmTypes(lines, registry = {}) {
     return null;
   }
 
+
   return lines.map(line => {
     const indent = line.match(/^(\s*)/)[1];
     const t      = line.trim();
 
-    // ── export resets scope ─────────────────────────────────────────────
     if (t.startsWith("export ")) {
       const name    = t.slice(7).trim().split(/\s+/)[0];
       const fnEntry = registry[name];
@@ -686,7 +724,6 @@ function inferWasmTypes(lines, registry = {}) {
       return line;
     }
 
-    // ── simple copy / const  (x = $y or x = "42") ──────────────────────
     const copyM = t.match(/^(\w+)\s*=\s*(\$\w+|(?:64)?"[^"]*")$/);
     if (copyM) {
       const [, varName, rawVal] = copyM;
@@ -705,11 +742,13 @@ function inferWasmTypes(lines, registry = {}) {
         : typeMap[ref];
 
       if (!inferredType) return line;
+
+      checkOutputType(varName, inferredType, "=", line);
+
       typeMap[varName] = inferredType;
       return `${indent}${inferredType} ${varName} = ${rawVal}`;
     }
 
-    // ── multi-return call  (a b, c d = fn(…)) ───────────────────────────
     const multiCallM = t.match(
       /^(\w+(?:\s+\w+)?(?:,\s*\w+(?:\s+\w+)?)+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/
     );
@@ -717,15 +756,28 @@ function inferWasmTypes(lines, registry = {}) {
       const [, lhsStr, operation, argsStr] = multiCallM;
       const entry = registry[operation];
       if (entry?.index !== undefined) {
-        const varParts = lhsStr.split(',').map(s => s.trim().split(/\s+/));
-        const varNames = varParts.map(p => p[p.length - 1]);
-        const outTypes = entry.outputs ?? [];
+        const varParts   = lhsStr.split(',').map(s => s.trim().split(/\s+/));
+        const varNames   = varParts.map(p => p[p.length - 1]);
+        const outTypes   = entry.outputs ?? [];
+        const inputTypes = entry.inputTypes ?? [];
+        const args       = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
 
         if (varNames.length > outTypes.length)
           throw new PreprocessError(
             `Call to '${operation}' returns ${outTypes.length} value(s) but ${varNames.length} are expected`,
             "inferWasmTypes", line
           );
+        if (args.length !== inputTypes.length)
+          throw new PreprocessError(
+            `Call to '${operation}' expects ${inputTypes.length} argument(s) but got ${args.length}`,
+            "inferWasmTypes", line
+          );
+
+        checkInputTypes(args, inputTypes, operation, line);
+
+        varNames.forEach((v, i) => {
+          if (outTypes[i]) checkOutputType(v, outTypes[i], operation, line);
+        });
 
         varNames.forEach((v, i) => { if (outTypes[i]) typeMap[v] = outTypes[i]; });
         const typedLhs = varNames.map((v, i) => `${outTypes[i] ?? 'i32'} ${v}`).join(', ');
@@ -733,14 +785,38 @@ function inferWasmTypes(lines, registry = {}) {
       }
     }
 
-    // ── single-return call  (x = op(…)) ─────────────────────────────────
     const callM = t.match(/^(\w+)\s*=\s*([\w.]+)\s*\((.+)\)\s*$/);
     if (callM) {
       const [, varName, operation, argsStr] = callM;
+      const entry = registry[operation];
+      const args  = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
+
+      if (entry) {
+        const expected = entry.index !== undefined
+          ? (entry.inputTypes ?? []).length
+          : entry.arity;
+        if (expected !== -1 && args.length !== expected)
+          throw new PreprocessError(
+            `'${operation}' expects ${expected} argument(s) but got ${args.length}`,
+            "inferWasmTypes", line
+          );
+
+        if (entry.index !== undefined) {
+          checkInputTypes(args, entry.inputTypes ?? [], operation, line);
+        }
+      }
+
       const resolved = resolveTypes(operation, argsStr, line);
       if (!resolved) return line;
 
       const { resultType, opType, isCall, index } = resolved;
+
+      if (!isCall && entry?.validTypes) {
+        checkBuiltinTypes(args, operation, opType, entry.validTypes, line);
+      }
+
+      checkOutputType(varName, resultType, operation, line);
+
       typeMap[varName] = resultType;
 
       if (isCall)
@@ -749,10 +825,29 @@ function inferWasmTypes(lines, registry = {}) {
       return `${indent}${resultType} ${varName} = ${operation} ${opType}(${argsStr})`;
     }
 
-    // ── void call  op(…) ─────────────────────────────────────────────────
     const voidM = t.match(/^([\w.]+)\s*\((.*)\)\s*$/);
     if (voidM) {
-      const entry = registry[voidM[1]];
+      const entry    = registry[voidM[1]];
+      const args     = voidM[2] ? voidM[2].split(',').map(a => a.trim()).filter(a => a) : [];
+
+      if (entry) {
+        const expected = entry.index !== undefined
+          ? (entry.inputTypes ?? []).length
+          : entry.arity;
+        if (expected !== -1 && args.length !== expected)
+          throw new PreprocessError(
+            `'${voidM[1]}' expects ${expected} argument(s) but got ${args.length}`,
+            "inferWasmTypes", line
+          );
+
+        if (entry.index !== undefined) {
+          checkInputTypes(args, entry.inputTypes ?? [], voidM[1], line);
+        } else if (entry.validTypes) {
+          const opType = args.map(argType).find(t => t != null) ?? "i32";
+          checkBuiltinTypes(args, voidM[1], opType, entry.validTypes, line);
+        }
+      }
+
       if (entry?.index !== undefined)
         return `${indent}callfn ${entry.index}(${voidM[2]})`;
     }
@@ -761,9 +856,6 @@ function inferWasmTypes(lines, registry = {}) {
   });
 }
 
-// ─────────────────────────────────────────────
-//  evaluate
-// ─────────────────────────────────────────────
 
 function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
   const output      = [];
@@ -772,7 +864,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
   let   knownLocals = new Set();
   let   tempIndex   = 0;
 
-  // collect global names first
   for (const line of lines) {
     const t = line.trim();
     if (t.startsWith("global ")) {
@@ -787,7 +878,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
   for (const line of lines) {
     const t = line.trim();
 
-    // ── export header ───────────────────────────────────────────────────
     if (t.startsWith("export")) {
       knownLocals = new Set();
       exportIdx   = output.length;
@@ -811,9 +901,7 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       continue;
     }
 
-    // ── global declarations pass-through ───────────────────────────────
     if (t.startsWith("global ")) {
-      // validate: global [mut] <type> <name> [value]
       const tokens = t.split(/\s+/);
       let i = 1;
       if (tokens[i] === 'mut') i++;
@@ -835,7 +923,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       continue;
     }
 
-    // ── return <name> ───────────────────────────────────────────────────
     const returnM = t.match(/^return\s+(\w+)$/);
     if (returnM) {
       const name = returnM[1];
@@ -851,7 +938,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       continue;
     }
 
-    // ── copy / const  ([type] dest = $src | "literal") ─────────────────
     const copyM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*(\$\w+|(?:64)?"[^"]*")$/);
     if (copyM) {
       const [, maybeType, dest, rawVal] = copyM;
@@ -888,7 +974,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       continue;
     }
 
-    // ── multi-return call  (type name, …  = callfn N(…)) ───────────────
     const multiVarCallM = t.match(
       /^((?:\w+\s+\w+)(?:,\s*(?:\w+\s+\w+))*)\s*=\s*callfn\s+(\d+)\((.*)\)$/
     );
@@ -917,6 +1002,12 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
 
       const inputTypes = callInputMap[fnIdx] ?? [];
       const args = argsStr ? argsStr.split(',').map(a => a.trim()).filter(a => a) : [];
+
+      if (args.length !== inputTypes.length)
+        throw new PreprocessError(
+          `Function index ${fnIdx} expects ${inputTypes.length} argument(s) but got ${args.length}`,
+          "evaluate", line
+        );
       args.forEach((arg, argIdx) => {
         if (arg.startsWith('"') || arg.startsWith('64"')) {
           const argIs64   = arg.startsWith('64"');
@@ -942,7 +1033,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       continue;
     }
 
-    // ── single-return call  ([type] dest = <op>(…) | callfn N(…)) ──────
     const callM = t.match(/^(?:(\w+)\s+)?(\w+)\s*=\s*([^(]+)\((.*)\)$/);
     if (callM) {
       const [, maybeType, dest, rawOp, argsStr] = callM;
@@ -986,7 +1076,13 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       }
 
       if (opStr.startsWith('callfn ')) {
-        const fnIdx    = parseInt(opStr.slice(7).trim(), 10);
+        const fnIdx        = parseInt(opStr.slice(7).trim(), 10);
+        const expectedArgs = callInputMap[fnIdx];
+        if (expectedArgs && args.length !== expectedArgs.length)
+          throw new PreprocessError(
+            `Function index ${fnIdx} expects ${expectedArgs.length} argument(s) but got ${args.length}`,
+            "evaluate", line
+          );
         const retTypes = callReturnMap[fnIdx] ?? [];
         output.push(`call ${fnIdx}`);
         for (let i = 1; i < retTypes.length; i++) output.push('drop');
@@ -998,7 +1094,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       continue;
     }
 
-    // ── void call  op(…) ─────────────────────────────────────────────────
     const voidCallM = t.match(/^([^(]+)\((.*)\)$/);
     if (voidCallM) {
       const [, rawOp, argsStr] = voidCallM;
@@ -1027,7 +1122,13 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       }
 
       if (opStr.startsWith('callfn ')) {
-        const fnIdx    = parseInt(opStr.slice(7).trim(), 10);
+        const fnIdx        = parseInt(opStr.slice(7).trim(), 10);
+        const expectedArgs = callInputMap[fnIdx];
+        if (expectedArgs && args.length !== expectedArgs.length)
+          throw new PreprocessError(
+            `Function index ${fnIdx} expects ${expectedArgs.length} argument(s) but got ${args.length}`,
+            "evaluate", line
+          );
         const retTypes = callReturnMap[fnIdx] ?? [];
         output.push(`call ${fnIdx}`);
         for (let i = 0; i < retTypes.length; i++) output.push('drop');
@@ -1038,7 +1139,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
       continue;
     }
 
-    // ── bare keywords ───────────────────────────────────────────────────
     if (['else', 'end'].includes(t)) {
       output.push(`${t} empty`);
     } else {
@@ -1046,7 +1146,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
     }
   }
 
-  // ── post-processing: tee-collapse and dead-local removal ───────────────
 
   function collapseSetGet(lines) {
     const result = [];
@@ -1087,9 +1186,6 @@ function evaluate(lines, callReturnMap = {}, callInputMap = {}) {
   return removeUnusedLocals(collapseSetGet(output));
 }
 
-// ─────────────────────────────────────────────
-//  artificialize
-// ─────────────────────────────────────────────
 
 function artificialize(lines) {
   const globalIndexMap = {};
@@ -1145,7 +1241,6 @@ function artificialize(lines) {
       continue;
     }
 
-    // ── function body ───────────────────────────────────────────────────
     const funcLines = [line];
     i++;
 
@@ -1226,9 +1321,6 @@ function artificialize(lines) {
   return result;
 }
 
-// ─────────────────────────────────────────────
-//  hoistStringLiterals
-// ─────────────────────────────────────────────
 
 function hoistStringLiterals(lines) {
   let dataEnd = 0;
@@ -1303,15 +1395,11 @@ function hoistStringLiterals(lines) {
   return [...dataLines, ...lines];
 }
 
-// ─────────────────────────────────────────────
-//  validateDirectives  (called inside preprocess)
-// ─────────────────────────────────────────────
 
 function validateDirectives(lines) {
   for (const line of lines) {
     const t = line.trim();
 
-    // memory <pages>
     if (t.startsWith("memory ")) {
       const tokens = t.split(/\s+/);
       const pages  = Number(tokens[1]);
@@ -1327,7 +1415,6 @@ function validateDirectives(lines) {
         );
     }
 
-    // global [mut] <type> <name> [<value>]
     if (t.startsWith("global ")) {
       const tokens = t.split(/\s+/);
       let   i      = 1;
@@ -1347,7 +1434,6 @@ function validateDirectives(lines) {
         );
     }
 
-    // data <offset> <bytes…>  or  data <offset> "<string>"
     if (t.startsWith("data ")) {
       const tokens = t.split(/\s+/);
       const offset = Number(tokens[1]);
@@ -1365,9 +1451,6 @@ function validateDirectives(lines) {
   }
 }
 
-// ─────────────────────────────────────────────
-//  preprocess  (main entry point)
-// ─────────────────────────────────────────────
 
 function preprocess(code, libs = {}) {
   if (typeof code !== 'string' || code.trim() === "")
@@ -1391,13 +1474,11 @@ function preprocess(code, libs = {}) {
   lines = lines.map(l => l.replace(/\/\/.*$/, "").trim()).filter(l => l.length > 0);
   console.log("after liminary:", lines);
 
-  // validate memory / global / data directives before anything else mutates them
   validateDirectives(lines);
 
   lines = hoistStringLiterals(lines);
   lines = reorder(lines);
 
-  // ── flatten expressions ──────────────────────────────────────────────
   const temp     = [];
   let   flatIdx  = 0;
   const KEYWORDS = new Set(["export", "global", "import", "memory", "data"]);
@@ -1445,9 +1526,6 @@ function preprocess(code, libs = {}) {
   return lines;
 }
 
-// ─────────────────────────────────────────────
-//  Exports
-// ─────────────────────────────────────────────
 
 export {
   PreprocessError,
@@ -1720,7 +1798,6 @@ export function compile(code, libs = {}) {
       size += 1 + e.name.length + 1 + encodeULEB128(idx + importFnCount).length;
     });
     if (memory?.open) {
-      // name_len (1) + name bytes + kind byte (0x02) + memory index (0x00)
       size += 1 + memExportName.length + 1 + 1;
     }
 
@@ -1731,7 +1808,7 @@ export function compile(code, libs = {}) {
     });
     if (memory?.open) {
       binary.push(memExportName.length, ...memExportNameBytes);
-      binary.push(0x02, 0x00); // kind: memory (0x02), index: 0
+      binary.push(0x02, 0x00);
     }
   }
 
