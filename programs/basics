@@ -36,9 +36,8 @@ export increment_counter => i32 // adds 1 to the counter global
 export get_counter => i32 // gets the value of the global counter without changing it
     return(counter)
 
-export print_A // prints the letter 'A' (ascii code 65) and triggers rendering with '\0' (ascii code 0)
+export print_A // prints the letter 'A' (ascii code 65)
     putchar("65")
-    putchar("0")
 
 export triangular_number i32 n => i32
     if (eqz(n)){
