@@ -655,7 +655,9 @@ function appendToPrint(text) {
 async function gatherLibs(code) {
   const libs = {};
   for (const line of code.split("\n")) {
+    console.log(line)
     const m = line.match(/^\s*#include\s+<([^>]+)>\s*$/);
+    console.log(m)
     if (!m) continue;
     const name = m[1].trim();
     if (name in libs) continue;
