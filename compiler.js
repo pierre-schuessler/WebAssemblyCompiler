@@ -213,8 +213,8 @@ function resolveIncludes(lines, libs = {}) {
 
 function liminaryResolve(lines) {
   return lines.map(l => 
-    l.replace(/}\s*else\s*\(\)\s*\{/g, "else()")
-     .replace(/\}/g, "\nend()")
+    l.replace(/}\s*else\s*\(\)\s*\{/g, "else()") // 1. Catches the else block
+     .replace(/}/g, "end()")                     // 2. Catches any remaining standalone '}'
   );
 }
 
