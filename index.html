@@ -12,9 +12,10 @@
     <div class="workspace">
       <div class="editor-row">
         <div class="activity-bar">
-          <div class="activity-btn" id="activityEnv" title="Env Imports">⚙</div>
-          <div class="activity-btn" id="activityDocs" title="Documentation">📄</div>
-          <div class="activity-btn" id="activityProg" title="Programs">📁</div>
+          <div class="activity-btn" id="activityEnv"     title="Env Imports">⚙</div>
+          <div class="activity-btn" id="activityDocs"    title="Documentation">📄</div>
+          <div class="activity-btn" id="activityProg"    title="Programs">📁</div>
+          <div class="activity-btn" id="activitySources" title="Sources">⬡</div>
         </div>
 
         <div class="side-panel collapsed" id="sidePanel" style="width: 260px">
@@ -76,6 +77,21 @@
           </div>
         </div>
         <div class="resize-handle" id="resizeProg" title="Drag to resize"></div>
+
+        <div class="sources-panel collapsed" id="sourcesPanel" style="width: 260px">
+          <div class="side-panel-header">
+            <span class="side-panel-title">Sources</span>
+          </div>
+          <div class="src-group">
+            <div class="src-group-label">Compiler</div>
+            <div class="src-item-list" id="srcCompilerList"></div>
+          </div>
+          <div class="src-group">
+            <div class="src-group-label">Editor</div>
+            <div class="src-item-list" id="srcEditorList"></div>
+          </div>
+        </div>
+        <div class="resize-handle" id="resizeSources" title="Drag to resize"></div>
 
         <div class="line-numbers" id="lineNumbers">
           <span class="line-number active">1</span>
