@@ -186,9 +186,9 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
 
 
 
-const DOC_FILES = ["language.md"];
+const DOC_FILES = ["language_1.md"];
 const DISPLAY_NAMES = {
-  "language.md": "Language reference"
+  "language_1.md": "Language reference"
 };
 
 const docsCache = {};
