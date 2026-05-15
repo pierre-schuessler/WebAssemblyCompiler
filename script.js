@@ -2,7 +2,7 @@
 // Add entries here to expose alternative compiler / editor backends in the UI.
 
 const COMPILER_SOURCES = [
-  { id: "lang_1_compiler_v2",  label: "Language v1 Compiler v2", path: ";/compilers/lang_1.js" },
+  { id: "lang_1_compiler_v2",  label: "Language v1 Compiler v2", path: "./compilers/lang_1.js" },
   { id: 'lang_2_compiler_v1', label: "Language v2 Compiler v1", path: "./compiler.js"}
 ];
 
