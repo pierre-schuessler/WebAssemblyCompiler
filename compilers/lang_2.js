@@ -1,6 +1,4 @@
 export function compile(code, libs = {}) {
-
-    const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
     let types       = [],
         functions   = [],
         imports     = [],
@@ -24,6 +22,7 @@ export function compile(code, libs = {}) {
 }
 
 function formatBinary(types = [], functions = [], imports = [], exports = [], codes = [], globals = [], globalNames = [], dataSegs = [], memory = null, tmp = null){
+    const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
     const importFnCount = imports.length;
 
     {
