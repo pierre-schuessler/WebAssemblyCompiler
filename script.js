@@ -1,21 +1,156 @@
-import { compile, test } from "./compiler.js";
+// ─── Source registry ────────────────────────────────────────────────────────
+// Add entries here to expose alternative compiler / editor backends in the UI.
 
-import { initEditor } from "./editor.js";
+const COMPILER_SOURCES = [
+  { id: "lang_1_compiler_v2",  label: "Language v1 Compiler v2",    path: "compilers/lang_1.js" },
+];
 
-const editor = initEditor(
-  document.getElementById("code"),
-  document.getElementById("editorWrap")
-);
+const EDITOR_SOURCES = [
+  { id: "lang_1",  label: "Language v1", path: "./lang_1.js" },
+];
 
+// ─── Active source state ─────────────────────────────────────────────────────
 
+let activeCompilerId = localStorage.getItem("wasm-compiler-src") || COMPILER_SOURCES[0].id;
+let activeEditorId   = localStorage.getItem("wasm-editor-src")   || EDITOR_SOURCES[0].id;
 
+// Mutable references so the rest of the file always calls the current version.
+let compile    = null;
+let initEditor = null;
+let editor     = null;
+
+// ─── Dynamic loader ──────────────────────────────────────────────────────────
+
+async function loadCompiler(id) {
+  const src = COMPILER_SOURCES.find(s => s.id === id) ?? COMPILER_SOURCES[0];
+  const mod  = await import(src.path);
+  compile    = mod.compile;
+  activeCompilerId = src.id;
+  localStorage.setItem("wasm-compiler-src", src.id);
+}
+
+async function loadEditor(id) {
+  const src    = EDITOR_SOURCES.find(s => s.id === id) ?? EDITOR_SOURCES[0];
+  const mod    = await import(src.path);
+  initEditor   = mod.initEditor;
+  activeEditorId = src.id;
+  localStorage.setItem("wasm-editor-src", src.id);
+}
+
+// Bootstrap: load both saved (or default) sources, then start the app.
+async function bootstrap() {
+  await Promise.all([
+    loadCompiler(activeCompilerId),
+    loadEditor(activeEditorId),
+  ]);
+
+  editor = initEditor(
+    document.getElementById("code"),
+    document.getElementById("editorWrap")
+  );
+
+  // Render the switcher panel to reflect restored state.
+  renderSourcesPanel();
+  // Run the rest of the init logic that depends on editor/compile being ready.
+  initApp();
+}
+
+bootstrap();
+
+// ─── Source-switcher panel ────────────────────────────────────────────────────
+
+function toggleSourcesPanel() {
+  const panel = document.getElementById("sourcesPanel");
+  const btn   = document.getElementById("activitySources");
+  const open  = panel.classList.toggle("collapsed") === false;
+  btn.classList.toggle("active", open);
+  if (open) renderSourcesPanel();
+}
+
+function renderSourcesPanel() {
+  renderSourceGroup(
+    "srcCompilerList",
+    COMPILER_SOURCES,
+    activeCompilerId,
+    async (id) => {
+      if (id === activeCompilerId) return;
+      print(`<span class="c-muted">switching compiler → </span><span class="c-ok">${esc(id)}</span>`);
+      try {
+        await loadCompiler(id);
+        renderSourcesPanel();
+        print(`<span class="c-ok">✓ compiler loaded: ${esc(id)}</span>`);
+      } catch (err) {
+        print(`<span class="c-err">✗ failed to load compiler "${esc(id)}": ${esc(err.message)}</span>`);
+      }
+      print("");
+    }
+  );
+
+  renderSourceGroup(
+    "srcEditorList",
+    EDITOR_SOURCES,
+    activeEditorId,
+    async (id) => {
+      if (id === activeEditorId) return;
+      print(`<span class="c-muted">switching editor → </span><span class="c-ok">${esc(id)}</span>`);
+      try {
+        await loadEditor(id);
+        // Re-mount the editor with the newly loaded initEditor function.
+        editor = initEditor(
+          document.getElementById("code"),
+          document.getElementById("editorWrap")
+        );
+        renderSourcesPanel();
+        updateLineNumbers();
+        print(`<span class="c-ok">✓ editor loaded: ${esc(id)}</span>`);
+      } catch (err) {
+        print(`<span class="c-err">✗ failed to load editor "${esc(id)}": ${esc(err.message)}</span>`);
+      }
+      print("");
+    }
+  );
+}
+
+function renderSourceGroup(listId, sources, activeId, onSelect) {
+  const list = document.getElementById(listId);
+  if (!list) return;
+
+  list.innerHTML = sources.map(src => `
+    <div class="src-item${src.id === activeId ? " active" : ""}" data-id="${esc(src.id)}">
+      <span class="src-item-dot"></span>
+      <span class="src-item-label">${esc(src.label)}</span>
+      <span class="src-item-path">${esc(src.path)}</span>
+    </div>
+  `).join("");
+
+  list.querySelectorAll(".src-item").forEach(el => {
+    el.addEventListener("click", () => onSelect(el.dataset.id));
+  });
+}
+
+// ─── The rest of the original app ────────────────────────────────────────────
+
+function initApp() {
+
+  makeResizable("resizeEnv",     "sidePanel",    140, 520, "wasm-env-panel-w");
+  makeResizable("resizeDocs",    "docsPanel",    140, 520, "wasm-docs-panel-w");
+  makeResizable("resizeProg",    "progPanel",    140, 520, "wasm-prog-panel-w");
+  makeResizable("resizeSources", "sourcesPanel", 140, 520, "wasm-sources-panel-w");
+
+  renderEnvList();
+  updateLineNumbers();
+
+  print(`<span class="c-info">WASM Compiler ready.</span>`);
+  print(`<span class="c-muted">compile · run &lt;fn&gt; [args] · make · hex · clear · help</span>`);
+  print("");
+}
 
 function makeResizable(handleId, panelId, minW, maxW, storageKey) {
   const handle = document.getElementById(handleId);
-  const panel = document.getElementById(panelId);
-  let startX,
-    startW,
-    dragging = false;
+  const panel  = document.getElementById(panelId);
+  if (!handle || !panel) return;
+
+  let startX, startW, dragging = false;
 
   const saved = localStorage.getItem(storageKey);
   if (saved) panel.style.width = saved + "px";
@@ -25,8 +160,8 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
   handle.addEventListener("mousedown", (e) => {
     if (panel.classList.contains("collapsed")) return;
     dragging = true;
-    startX = e.clientX;
-    startW = panel.offsetWidth;
+    startX   = e.clientX;
+    startW   = panel.offsetWidth;
     handle.classList.add("dragging");
     document.body.classList.add("dragging-panel");
     e.preventDefault();
@@ -35,7 +170,7 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
   document.addEventListener("mousemove", (e) => {
     if (!dragging) return;
     const delta = e.clientX - startX;
-    const newW = Math.max(minW, Math.min(maxW, startW + delta));
+    const newW  = Math.max(minW, Math.min(maxW, startW + delta));
     panel.style.width = newW + "px";
   });
 
@@ -47,10 +182,6 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
     localStorage.setItem(storageKey, panel.offsetWidth);
   });
 }
-
-makeResizable("resizeEnv", "sidePanel", 140, 520, "wasm-env-panel-w");
-makeResizable("resizeDocs", "docsPanel", 140, 520, "wasm-docs-panel-w");
-makeResizable("resizeProg", "progPanel", 140, 520, "wasm-prog-panel-w");
 
 
 
@@ -64,8 +195,8 @@ let currentDoc = null;
 
 function toggleDocsPanel() {
   const panel = document.getElementById("docsPanel");
-  const btn = document.getElementById("activityDocs");
-  const open = panel.classList.toggle("collapsed") === false;
+  const btn   = document.getElementById("activityDocs");
+  const open  = panel.classList.toggle("collapsed") === false;
   btn.classList.toggle("active", open);
   document.getElementById("resizeDocs").classList.toggle("hidden-handle", !open);
   if (open) showDocsList();
@@ -84,7 +215,6 @@ function renderDocsList() {
   const list = document.getElementById("docsFileList");
   list.innerHTML = DOC_FILES.map((name) => {
     const displayName = DISPLAY_NAMES[name] || name;
-
     return `
       <div class="docs-file-item${currentDoc === name ? " active" : ""}" data-doc="${esc(name)}">
           <span class="docs-file-icon">▸</span>
@@ -120,7 +250,7 @@ async function openDoc(name) {
   viewer.innerHTML = `<p style="color:var(--text-muted);font-size:12px;font-family:-apple-system,'Segoe UI',sans-serif;">Loading…</p>`;
 
   try {
-    const res = await fetch(`docs/${name}`);
+    const res  = await fetch(`docs/${name}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`);
     const text = await res.text();
     docsCache[name] = text;
@@ -234,15 +364,15 @@ const PROG_SECTIONS = [
   {
     label: "Simple programs",
     files: [
-      { id: "fibonacci",      name: "Fibonacci" },
-      { id: "pi_approx",      name: "Approximation for pi" },
+      { id: "fibonacci",  name: "Fibonacci" },
+      { id: "pi_approx",  name: "Approximation for pi" },
     ]
   },
   {
     label: "Libraries",
     files: [
-      { id: "system",    name: "System management" },
-      { id: "stdio",    name: "Printing different types to standart output" },
+      { id: "system",  name: "System management" },
+      { id: "stdio",   name: "Printing different types to standart output" },
     ]
   },
 ];
@@ -251,12 +381,12 @@ const progsCache = {};
 let userProgs = [];
 try { userProgs = JSON.parse(localStorage.getItem("wasm-user-progs") || "[]"); } catch {}
 
-let activeProg = null;
+let activeProg      = null;
 let progPanelInited = false;
 
 function toggleProgPanel() {
-  const panel = document.getElementById("progPanel");
-  const btn = document.getElementById("activityProg");
+  const panel    = document.getElementById("progPanel");
+  const btn      = document.getElementById("activityProg");
   const collapsed = panel.classList.toggle("collapsed");
   btn.classList.toggle("active", !collapsed);
   document.getElementById("resizeProg").classList.toggle("hidden-handle", collapsed);
@@ -314,7 +444,7 @@ function renderProgList() {
       } else {
         await loadAdminProg(el.dataset.name);
       }
-      editor.refresh()
+      editor.refresh();
     });
   });
 
@@ -349,7 +479,7 @@ async function loadAdminProg(id) {
 
   print(`<span class="c-muted">loading…</span>`);
   try {
-    const res = await fetch(`programs/${id}`);
+    const res  = await fetch(`programs/${id}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`);
     const text = await res.text();
     progsCache[id] = text;
@@ -378,7 +508,7 @@ function autoSaveCurrentProg() {
   if (!activeProg || !activeProg.isUser) return;
   if (activeProg.idx >= userProgs.length) return;
   userProgs[activeProg.idx].code = document.getElementById("code").value;
-  editor.refresh()
+  editor.refresh();
   try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
 }
 
@@ -416,7 +546,7 @@ function createNewProg() {
   autoSaveCurrentProg();
   userProgs.push({ name, code: "" });
   try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
-  const idx = userProgs.length - 1;
+  const idx  = userProgs.length - 1;
   activeProg = { isUser: true, idx, name };
   document.getElementById("code").value = "";
   updateLineNumbers();
@@ -429,18 +559,14 @@ function createNewProg() {
 
 
 let envImports = [
-  {
-    name: "pow",
-    sig: "i32 i32 => i32",
-    body: "return Math.pow(a, b)|0;",
-  },
-  { name: "log", sig: "i32 => i32", body: "console.log(a); return a;" },
+  { name: "pow", sig: "i32 i32 => i32", body: "return Math.pow(a, b)|0;" },
+  { name: "log", sig: "i32 => i32",     body: "console.log(a); return a;" },
 ];
 let editingIdx = null;
 
 function toggleEnvPanel() {
-  const panel = document.getElementById("sidePanel");
-  const btn = document.getElementById("activityEnv");
+  const panel    = document.getElementById("sidePanel");
+  const btn      = document.getElementById("activityEnv");
   const collapsed = panel.classList.toggle("collapsed");
   btn.classList.toggle("active", !collapsed);
   document.getElementById("resizeEnv").classList.toggle("hidden-handle", collapsed);
@@ -449,8 +575,7 @@ function toggleEnvPanel() {
 function renderEnvList() {
   const list = document.getElementById("envList");
   if (!envImports.length) {
-    list.innerHTML =
-      '<div class="env-empty">No env imports.<br>Click + to add one.</div>';
+    list.innerHTML = '<div class="env-empty">No env imports.<br>Click + to add one.</div>';
     return;
   }
   list.innerHTML = envImports
@@ -460,7 +585,7 @@ function renderEnvList() {
             <div class="env-item-name">${esc(e.name)}</div>
             <div class="env-item-sig">${esc(e.sig || "")}</div>
             <div class="env-item-actions">
-                <button class="env-action-btn" data-action="edit" data-idx="${i}">✎</button>
+                <button class="env-action-btn" data-action="edit"   data-idx="${i}">✎</button>
                 <button class="env-action-btn del" data-action="delete" data-idx="${i}">✕</button>
             </div>
         </div>`,
@@ -475,7 +600,7 @@ function renderEnvList() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const idx = Number(btn.dataset.idx);
-      if (btn.dataset.action === "edit") editEnv(idx);
+      if (btn.dataset.action === "edit")   editEnv(idx);
       else if (btn.dataset.action === "delete") deleteEnv(idx);
     });
   });
@@ -493,7 +618,7 @@ function openForm(idx = null) {
     idx === null ? "New Import" : "Edit Import";
   const e = idx !== null ? envImports[idx] : { name: "", sig: "", body: "" };
   document.getElementById("envName").value = e.name;
-  document.getElementById("envSig").value = e.sig;
+  document.getElementById("envSig").value  = e.sig;
   document.getElementById("envBody").value = e.body;
   document.getElementById("envForm").classList.remove("hidden");
   document.getElementById("envName").focus();
@@ -504,9 +629,7 @@ function closeForm() {
   editingIdx = null;
 }
 
-function editEnv(i) {
-  openForm(i);
-}
+function editEnv(i)   { openForm(i); }
 
 function deleteEnv(i) {
   envImports.splice(i, 1);
@@ -518,60 +641,46 @@ function deleteEnv(i) {
 
 function saveEnv() {
   const name = document.getElementById("envName").value.trim();
-  const sig = document.getElementById("envSig").value.trim();
+  const sig  = document.getElementById("envSig").value.trim();
   const body = document.getElementById("envBody").value.trim();
-  if (!name) {
-    document.getElementById("envName").focus();
-    return;
-  }
+  if (!name) { document.getElementById("envName").focus(); return; }
   const entry = { name, sig, body };
-  if (editingIdx !== null) {
-    envImports[editingIdx] = entry;
-  } else {
-    envImports.push(entry);
-  }
+  if (editingIdx !== null) envImports[editingIdx] = entry;
+  else envImports.push(entry);
   renderEnvList();
   closeForm();
-  print(
-    `<span class="c-muted">env import saved: </span><span class="c-ok">${esc(name)}</span>`,
-  );
+  print(`<span class="c-muted">env import saved: </span><span class="c-ok">${esc(name)}</span>`);
   print("");
 }
 
 function buildEnvObject() {
   const env = {}, argNames = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
-  // ── stdin built-ins ──────────────────────────────────────────────────────
+  env.putchar = (a) => { console.stdout(String.fromCharCode(a)); };
 
-  env.putchar = (a)=>{console.stdout(String.fromCharCode(a));}
-
-  // readline(addr, maxLen) → writes line into WASM memory, returns byte count
   env.readline = (addr, maxLen) => {
     const input   = window.prompt("stdin:") ?? "";
-    const line    = input;
-    const encoded = new TextEncoder().encode(line);
+    const encoded = new TextEncoder().encode(input);
     const n       = Math.min(encoded.length, Math.max(0, maxLen - 1));
     const mem     = new Uint8Array(lastInstance.exports.memory.buffer);
     mem.set(encoded.subarray(0, n), addr);
-    mem[addr + n] = 0;   // null-terminate
+    mem[addr + n] = 0;
     return n;
   };
 
-  // getchar() → one byte at a time, buffers a whole prompt() line internally
   let _charBuf = [], _charPos = 0;
   env.getchar = () => {
     if (_charPos >= _charBuf.length) {
       const input = window.prompt("stdin:") ?? "";
-      if (input === null) return -1;  // cancelled = EOF
+      if (input === null) return -1;
       _charBuf = Array.from(new TextEncoder().encode(input + "\n"));
       _charPos = 0;
     }
     return _charBuf[_charPos++];
   };
 
-  // ── user-defined env imports (existing logic) ────────────────────────────
   for (const imp of envImports) {
-    if (imp.name in env) continue;   // don't override built-ins
+    if (imp.name in env) continue;
     const parts = imp.sig.split("=>")[0].trim().split(/\s+/).filter(Boolean);
     const args  = argNames.slice(0, parts.length);
     try {
@@ -585,21 +694,24 @@ function buildEnvObject() {
 }
 
 
-document.getElementById("activityEnv").addEventListener("click", toggleEnvPanel);
-document.getElementById("activityDocs").addEventListener("click", toggleDocsPanel);
-document.getElementById("activityProg").addEventListener("click", toggleProgPanel);
+// ─── Event listeners ──────────────────────────────────────────────────────────
 
-document.getElementById("envAddBtn").addEventListener("click", () => openForm());
+document.getElementById("activityEnv").addEventListener("click",     toggleEnvPanel);
+document.getElementById("activityDocs").addEventListener("click",    toggleDocsPanel);
+document.getElementById("activityProg").addEventListener("click",    toggleProgPanel);
+document.getElementById("activitySources").addEventListener("click", toggleSourcesPanel);
+
+document.getElementById("envAddBtn").addEventListener("click",    () => openForm());
 document.getElementById("envCancelBtn").addEventListener("click", closeForm);
-document.getElementById("envSaveBtn").addEventListener("click", saveEnv);
+document.getElementById("envSaveBtn").addEventListener("click",   saveEnv);
 
 document.getElementById("docsBack").addEventListener("click", showDocsList);
 
-document.getElementById("progAddBtn").addEventListener("click", openProgNewForm);
+document.getElementById("progAddBtn").addEventListener("click",    openProgNewForm);
 document.getElementById("progNewCancel").addEventListener("click", closeProgNewForm);
-document.getElementById("progNewSave").addEventListener("click", createNewProg);
+document.getElementById("progNewSave").addEventListener("click",   createNewProg);
 document.getElementById("progNewName").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") createNewProg();
+  if (e.key === "Enter")  createNewProg();
   if (e.key === "Escape") closeProgNewForm();
 });
 
@@ -610,17 +722,13 @@ document.getElementById("code").addEventListener("input", () => {
   }
 });
 
-renderEnvList();
 
 
+// ─── Terminal ────────────────────────────────────────────────────────────────
 
 const termOutput = document.getElementById("termOutput");
-const termInput = document.getElementById("termInput");
-let cmdHistory = [],
-  histIdx = -1,
-  lastBinary = null,
-  lastInstance = null,
-  lastMeta = {};
+const termInput  = document.getElementById("termInput");
+let cmdHistory = [], histIdx = -1, lastBinary = null, lastInstance = null, lastMeta = {};
 
 function esc(s) {
   return String(s)
@@ -628,6 +736,7 @@ function esc(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
+
 function print(html) {
   const d = document.createElement("div");
   d.className = "term-line";
@@ -638,20 +747,17 @@ function print(html) {
 
 function appendToPrint(text) {
   const parts = text.split("\n");
-
   parts.forEach((part, index) => {
     if (index === 0) {
       const last = termOutput.lastElementChild;
-      if (last) {
-        last.innerHTML += part;
-      } else {
-        print(part);
-      }
+      if (last) last.innerHTML += part;
+      else print(part);
     } else {
       print(part);
     }
   });
 }
+
 async function gatherLibs(code) {
   const libs = {};
   for (const line of code.split("\n")) {
@@ -679,12 +785,6 @@ async function gatherLibs(code) {
 
 console.stdout = appendToPrint;
 
-print(`<span class="c-info">WASM Compiler ready.</span>`);
-print(
-  `<span class="c-muted">compile · run &lt;fn&gt; [args] · make · hex · clear · help</span>`,
-);
-print("");
-
 async function runCommand(raw, isInternal = false) {
   const cmd = raw.trim();
   if (!cmd) return;
@@ -695,13 +795,11 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-prompt">$ </span>${esc(cmd)}`);
   }
 
-  const parts = cmd.split(/\s+/),
-    verb = parts[0].toLowerCase();
+  const parts = cmd.split(/\s+/), verb = parts[0].toLowerCase();
 
   if (verb === "help") {
     print(`<span class="c-muted">  compile         — compile only</span>`);
     print(`<span class="c-muted">  run fn [args] — call exported function</span>`);
-    print(`<span class="c-muted">  make [args]   — compile &amp; test exports with given args</span>`);
     print(`<span class="c-muted">  boot [args]   — compile &amp; run "main" with given args</span>`);
     print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
     print(`<span class="c-muted">  clear         — clear terminal</span>`);
@@ -713,37 +811,30 @@ async function runCommand(raw, isInternal = false) {
 
   else if (verb === "compile") {
     const code = document.getElementById("code").value;
-    if (!code.trim()) {
-      print(`<span class="c-err">editor is empty</span>`);
-      return;
-    }
+    if (!code.trim()) { print(`<span class="c-err">editor is empty</span>`); return; }
 
     print(`<span class="c-muted">compiling…</span>`);
 
     try {
-      const libs = await gatherLibs(code);
+      const libs   = await gatherLibs(code);
       const binary = compile(code, libs);
       if (!binary) throw new Error("compile() returned null");
 
       lastBinary = binary;
-      lastMeta = binary.meta || {};
+      lastMeta   = binary.meta || {};
 
       print(`<span class="c-ok">✓ ${binary.length} bytes</span>`);
 
       let hex = "";
       const lim = Math.min(binary.length, 48);
-      for (let i = 0; i < lim; i++) {
+      for (let i = 0; i < lim; i++)
         hex += binary[i].toString(16).padStart(2, "0").toUpperCase() + " ";
-      }
-      if (binary.length > 48) {
+      if (binary.length > 48)
         hex += `<span class="c-muted">… +${binary.length - 48}</span>`;
-      }
       print(`<span class="c-hex">${hex}</span>`);
 
-      const mod = await WebAssembly.compile(binary);
-      lastInstance = await WebAssembly.instantiate(mod, {
-        env: buildEnvObject(),
-      });
+      const mod  = await WebAssembly.compile(binary);
+      lastInstance = await WebAssembly.instantiate(mod, { env: buildEnvObject() });
 
       const exps = Object.keys(lastInstance.exports);
       print(`<span class="c-muted">exports: </span><span class="c-ok">${exps.map(esc).join(", ")}</span>`);
@@ -756,37 +847,26 @@ async function runCommand(raw, isInternal = false) {
   else if (verb === "make") {
     await runCommand("compile", true);
     print("");
-
     if (!lastInstance) return;
 
     const supplied = parts.slice(1).map(Number);
-    const exps = Object.keys(lastInstance.exports);
+    const exps     = Object.keys(lastInstance.exports);
 
     for (const fn of exps) {
       if (typeof lastInstance.exports[fn] !== "function") continue;
-
-      const needed = lastMeta[fn] ?? supplied.length;
+      const needed   = lastMeta[fn] ?? supplied.length;
       const testArgs = Array.from({ length: needed }, (_, i) =>
         i < supplied.length ? supplied[i] : 0,
       );
-
       await runCommand(`run ${fn} ${testArgs.join(" ")}`, true);
     }
   }
 
   else if (verb === "run") {
-    if (!lastInstance) {
-      print(`<span class="c-warn">⚠ run build/make first</span>`);
-      return;
-    }
+    if (!lastInstance) { print(`<span class="c-warn">⚠ run build/make first</span>`); return; }
 
-    const fn = parts[1],
-      args = parts.slice(2).map(Number);
-
-    if (!fn) {
-      print(`<span class="c-err">usage: run &lt;fn&gt; [args]</span>`);
-      return;
-    }
+    const fn   = parts[1], args = parts.slice(2).map(Number);
+    if (!fn) { print(`<span class="c-err">usage: run &lt;fn&gt; [args]</span>`); return; }
 
     const func = lastInstance.exports[fn];
     if (!func || typeof func !== "function") {
@@ -807,44 +887,30 @@ async function runCommand(raw, isInternal = false) {
   else if (verb === "boot") {
     await runCommand("compile", true);
     print("");
-
     if (!lastInstance) return;
 
     const supplied = parts.slice(1).map(Number);
-
-    const fn = "main";
+    const fn       = "main";
 
     if (typeof lastInstance.exports[fn] !== "function") {
       print(`No "${fn}" function found`);
       return;
     }
 
-    const needed = lastMeta[fn] ?? supplied.length;
+    const needed   = lastMeta[fn] ?? supplied.length;
     const testArgs = Array.from({ length: needed }, (_, i) =>
       i < supplied.length ? supplied[i] : 0,
     );
-
     await runCommand(`run ${fn} ${testArgs.join(" ")}`, true);
-  }
-  
-
-  else if (verb === "test") {
-    let args = parts.slice(1);
-    print(test(...args));
   }
 
   else if (verb === "hex") {
-    if (!lastBinary) {
-      print(`<span class="c-warn">⚠ run build first</span>`);
-      return;
-    }
+    if (!lastBinary) { print(`<span class="c-warn">⚠ run build first</span>`); return; }
     let row = "";
-    for (let i = 0; i < lastBinary.length; i++) {
+    for (let i = 0; i < lastBinary.length; i++)
       row += lastBinary[i].toString(16).padStart(2, "0").toUpperCase() + " ";
-    }
     if (row) print(`<span class="c-hex">${row}</span>`);
   }
-
 
   else {
     print(`<span class="c-err">✗ unknown command: ${esc(verb)}</span>`);
@@ -860,19 +926,11 @@ termInput.addEventListener("keydown", (e) => {
     runCommand(v);
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
-    if (histIdx < cmdHistory.length - 1) {
-      histIdx++;
-      termInput.value = cmdHistory[histIdx];
-    }
+    if (histIdx < cmdHistory.length - 1) { histIdx++; termInput.value = cmdHistory[histIdx]; }
   } else if (e.key === "ArrowDown") {
     e.preventDefault();
-    if (histIdx > 0) {
-      histIdx--;
-      termInput.value = cmdHistory[histIdx];
-    } else {
-      histIdx = -1;
-      termInput.value = "";
-    }
+    if (histIdx > 0) { histIdx--; termInput.value = cmdHistory[histIdx]; }
+    else { histIdx = -1; termInput.value = ""; }
   }
 });
 
@@ -880,37 +938,39 @@ document.getElementById("panel").addEventListener("click", () => termInput.focus
 
 
 
-const codeEl = document.getElementById("code");
-const lineNums = document.getElementById("lineNumbers");
+// ─── Line numbers & minimap ───────────────────────────────────────────────────
+
+const codeEl    = document.getElementById("code");
+const lineNums  = document.getElementById("lineNumbers");
 const editorWrap = document.getElementById("editorWrap");
 
 function getCursorLine() {
   return codeEl.value.substring(0, codeEl.selectionStart).split("\n").length;
 }
+
 function updateLineNumbers() {
   const lines = codeEl.value.split("\n");
-  const cur = getCursorLine();
-  let html = "";
+  const cur   = getCursorLine();
+  let html    = "";
   for (let i = 1; i <= lines.length; i++)
     html += `<span class="line-number${i === cur ? " active" : ""}">${i}</span>`;
-  lineNums.innerHTML = html;
-  lineNums.scrollTop = editorWrap.scrollTop;
+  lineNums.innerHTML      = html;
+  lineNums.scrollTop      = editorWrap.scrollTop;
   updateMinimap();
 }
+
 editorWrap.addEventListener("scroll", () => {
   lineNums.scrollTop = editorWrap.scrollTop;
   updateMinimap();
 });
-codeEl.addEventListener("input", updateLineNumbers);
-codeEl.addEventListener("keyup", updateLineNumbers);
-codeEl.addEventListener("click", updateLineNumbers);
+codeEl.addEventListener("input",  updateLineNumbers);
+codeEl.addEventListener("keyup",  updateLineNumbers);
+codeEl.addEventListener("click",  updateLineNumbers);
 codeEl.addEventListener("keydown", (e) => {
   if (e.key === "Tab") {
     e.preventDefault();
-    const s = codeEl.selectionStart,
-      end = codeEl.selectionEnd;
-    codeEl.value =
-      codeEl.value.substring(0, s) + "    " + codeEl.value.substring(end);
+    const s   = codeEl.selectionStart, end = codeEl.selectionEnd;
+    codeEl.value = codeEl.value.substring(0, s) + "    " + codeEl.value.substring(end);
     codeEl.selectionStart = codeEl.selectionEnd = s + 4;
     updateLineNumbers();
   }
@@ -921,22 +981,18 @@ codeEl.addEventListener("keydown", (e) => {
   }
 });
 
-
-const minimapCanvas = document.getElementById("minimapCanvas");
-const minimapViewport = document.getElementById("minimapViewport");
+const minimapCanvas    = document.getElementById("minimapCanvas");
+const minimapViewport  = document.getElementById("minimapViewport");
 const minimapContainer = document.getElementById("minimapContainer");
-const LINE_PX = 2,
-  LINE_GAP = 1,
-  LINE_STRIDE = LINE_PX + LINE_GAP;
-updateLineNumbers();
+const LINE_PX = 2, LINE_GAP = 1, LINE_STRIDE = LINE_PX + LINE_GAP;
 
 function updateMinimap() {
-  const lines = codeEl.value.split("\n");
-  const W = minimapContainer.offsetWidth,
-    totalH = lines.length * LINE_STRIDE;
-  minimapCanvas.width = W;
-  minimapCanvas.height = totalH;
-  minimapCanvas.style.width = W + "px";
+  const lines  = codeEl.value.split("\n");
+  const W      = minimapContainer.offsetWidth;
+  const totalH = lines.length * LINE_STRIDE;
+  minimapCanvas.width        = W;
+  minimapCanvas.height       = totalH;
+  minimapCanvas.style.width  = W + "px";
   minimapCanvas.style.height = totalH + "px";
   const ctx = minimapCanvas.getContext("2d");
   ctx.clearRect(0, 0, W, totalH);
@@ -944,27 +1000,19 @@ function updateMinimap() {
     if (!line.trim()) return;
     const alpha = Math.min(0.7, 0.2 + line.trim().length * 0.015);
     ctx.fillStyle = `rgba(212,212,212,${alpha})`;
-    ctx.fillRect(
-      2,
-      i * LINE_STRIDE,
-      Math.min(W - 4, line.length * 1.4),
-      LINE_PX,
-    );
+    ctx.fillRect(2, i * LINE_STRIDE, Math.min(W - 4, line.length * 1.4), LINE_PX);
   });
-  const containerH = minimapContainer.offsetHeight,
-    editorH = editorWrap.offsetHeight,
-    contentH = codeEl.scrollHeight || editorH;
-  const vpH = Math.max(6, Math.round(totalH * Math.min(1, editorH / contentH)));
-  const cursorY = (getCursorLine() - 1) * LINE_STRIDE;
-  let offsetTop = Math.max(
-    0,
-    Math.min(totalH - containerH, cursorY - containerH / 2),
-  );
-  minimapCanvas.style.top = -offsetTop + "px";
-  const scrollRatio =
-    contentH > editorH ? editorWrap.scrollTop / (contentH - editorH) : 0;
-  minimapViewport.style.top = scrollRatio * (totalH - vpH) - offsetTop + "px";
+  const containerH = minimapContainer.offsetHeight;
+  const editorH    = editorWrap.offsetHeight;
+  const contentH   = codeEl.scrollHeight || editorH;
+  const vpH        = Math.max(6, Math.round(totalH * Math.min(1, editorH / contentH)));
+  const cursorY    = (getCursorLine() - 1) * LINE_STRIDE;
+  let offsetTop    = Math.max(0, Math.min(totalH - containerH, cursorY - containerH / 2));
+  minimapCanvas.style.top   = -offsetTop + "px";
+  const scrollRatio = contentH > editorH ? editorWrap.scrollTop / (contentH - editorH) : 0;
+  minimapViewport.style.top    = scrollRatio * (totalH - vpH) - offsetTop + "px";
   minimapViewport.style.height = vpH + "px";
 }
+
 window.addEventListener("resize", updateMinimap);
 setTimeout(updateMinimap, 50);
