@@ -979,6 +979,14 @@ termInput.addEventListener("keydown", (e) => {
 
 document.getElementById("panel").addEventListener("click", () => termInput.focus());
 
+
+
+// ─── Line numbers & minimap ───────────────────────────────────────────────────
+
+const codeEl     = document.getElementById("code");
+const lineNums   = document.getElementById("lineNumbers");
+const editorWrap = document.getElementById("editorWrap");
+
 // Ctrl/Cmd+Enter: compile & run
 codeEl.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -988,12 +996,6 @@ codeEl.addEventListener("keydown", (e) => {
   }
 });
 
-
-// ─── Line numbers & minimap ───────────────────────────────────────────────────
-
-const codeEl     = document.getElementById("code");
-const lineNums   = document.getElementById("lineNumbers");
-const editorWrap = document.getElementById("editorWrap");
 
 function getCursorLine() {
   return codeEl.value.substring(0, codeEl.selectionStart).split("\n").length;
