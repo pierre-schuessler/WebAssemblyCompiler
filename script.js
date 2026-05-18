@@ -247,7 +247,7 @@ function _spawnWorker() {
         const field = row.querySelector(".term-stdin");
         field.focus();
 
-        field.addEventListener("keydown", (e) => {
+        field.addEventListener("keyup", (e) => {
           if (e.key !== "Enter") return;
           const value = field.value;
           row.innerHTML = `<span class="c-muted">stdin › </span><span class="c-ok">${esc(value)}</span>`;
