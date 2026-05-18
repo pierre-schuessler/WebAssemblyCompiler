@@ -253,7 +253,17 @@ function _spawnWorker() {
           row.innerHTML = `<span class="c-muted">stdin › </span><span class="c-ok">${esc(value)}</span>`;
           termInput.disabled = false;
           termInput.focus();
-          wasmWorker.postMessage({ type: "input-response", value });
+          
+          if (controlSAB && dataSAB) {
+            const encoded  = new TextEncoder().encode(value);
+            const dataView = new Uint8Array(dataSAB);
+            const ctrlView = new Int32Array(controlSAB);
+            const len = Math.min(encoded.length, dataView.length);
+            dataView.set(encoded.subarray(0, len));
+            Atomics.store(ctrlView, 1, len);   // write byte length
+            Atomics.store(ctrlView, 0, 1);     // signal ready
+            Atomics.notify(ctrlView, 0);       // wake the waiting worker
+          }
         });
         break;
       }
