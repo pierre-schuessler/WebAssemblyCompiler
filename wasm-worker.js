@@ -107,6 +107,7 @@ self.onmessage = async ({ data: msg }) => {
     case "init":
       controlBuf = new Int32Array(msg.controlSAB);
       dataBuf    = new Uint8Array(msg.dataSAB);
+      self.controlSAB = msg.controlSAB;
       break;
 
     // ── compile: instantiate a new WASM module ──────────────────────────────
