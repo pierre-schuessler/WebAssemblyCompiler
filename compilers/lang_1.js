@@ -1406,17 +1406,43 @@ function validateDirectives(lines) {
 
     if (t.startsWith("memory ")) {
       const tokens = t.split(/\s+/);
-      const pages  = Number(tokens[1]);
-      if (tokens.length < 2 || isNaN(pages) || pages < 0 || !Number.isInteger(pages))
+      
+      // Shift index if "open" is used
+      const targetToken = tokens[1] === "open" ? tokens[2] : tokens[1];
+      
+      if (!targetToken) {
         throw new PreprocessError(
-          `'memory' requires a non-negative integer page count, got '${tokens[1] ?? ''}'`,
+          `'memory' directive is missing page count`,
           "validateDirectives", line
         );
-      if (pages > 65536)
+      }
+
+      // Handle the min-max syntax (e.g., 1-2)
+      const parts = targetToken.split("-");
+      const minPages = Number(parts[0]);
+
+      if (isNaN(minPages) || minPages < 0 || !Number.isInteger(minPages))
         throw new PreprocessError(
-          `Memory size ${pages} exceeds WebAssembly maximum of 65536 pages (4 GiB)`,
+          `'memory' requires a non-negative integer minimum page count, got '${parts[0] ?? ''}'`,
           "validateDirectives", line
         );
+        
+      if (minPages > 65536)
+        throw new PreprocessError(
+          `Memory size ${minPages} exceeds WebAssembly maximum of 65536 pages (4 GiB)`,
+          "validateDirectives", line
+        );
+
+      // Validate max pages if provided
+      if (parts[1] !== undefined) {
+        const maxPages = Number(parts[1]);
+        if (isNaN(maxPages) || maxPages < minPages || !Number.isInteger(maxPages)) {
+          throw new PreprocessError(
+            `'memory' requires a valid maximum page count greater than or equal to minimum, got '${parts[1] ?? ''}'`,
+            "validateDirectives", line
+          );
+        }
+      }
     }
 
     if (t.startsWith("global ")) {
