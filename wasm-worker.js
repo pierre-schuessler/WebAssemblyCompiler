@@ -116,6 +116,7 @@ self.onmessage = async ({ data: msg }) => {
         const wasmMod  = await WebAssembly.compile(msg.binary);
         const env      = buildEnvObject(msg.envImports);
         lastInstance   = await WebAssembly.instantiate(wasmMod, { env });
+        self.lastInstance = lastInstance;
 
         const allExports  = Object.keys(lastInstance.exports);
         const funcExports = allExports.filter(
