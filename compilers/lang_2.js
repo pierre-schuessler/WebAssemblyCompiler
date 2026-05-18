@@ -1,4 +1,31 @@
 export function compile(code, libs = {}) {
+    /*
+        // DECLARATION //
+        @service1
+        endpoint1 : (int32) (int32) (int32) => (int32)
+
+
+        // SERVICES //
+        @service1
+        endpoint endpoint1 (a, b, c)
+        {
+            temp = add(a, b)
+            temp = sub(temp, c)
+            return (temp)
+        }
+
+        function sub (int32 a, int32 b)
+        {
+            return (a - b)
+        }
+
+        // MACROS //
+        add (int32 a, int32 b)
+        {
+            return (a + b)
+        } 
+    */
+
     let types       = [],
         functions   = [],
         imports     = [],
@@ -10,6 +37,11 @@ export function compile(code, libs = {}) {
         memory      = null,
         tmp         = null;
 
+    let import_code, declaration_code, services_code, macros_code  = cleanup(code);
+    imports = compile_imports(import_code)
+    types, functions, exports = compile_declaration(declaration_code);
+    let executable_code = merge_executables(services_code, macros_code)
+    codes = compile_executables(executable_code);
     
 
     const result = formatBinary(types, functions, imports, exports, codes, globals, globalNames, dataSegs, memory, tmp);
@@ -19,6 +51,53 @@ export function compile(code, libs = {}) {
     result.meta = meta;
 
     return result;
+}
+
+function cleanup(input) {
+    // Normalize line endings and trim outer whitespace
+    const code = input.replace(/\r\n/g, "\n").trim();
+
+    // Helper: extract a block between a header and the next header
+    function extractSection(startTag, endTag) {
+        const startIndex = code.indexOf(startTag);
+        if (startIndex === -1) return "";
+
+        const from = startIndex + startTag.length;
+        let endIndex = code.length;
+
+        if (endTag) {
+            const nextIndex = code.indexOf(endTag, from);
+            if (nextIndex !== -1) endIndex = nextIndex;
+        }
+
+        return code
+            .slice(from, endIndex)
+            .replace(/\n+/g, "\n")     // collapse multiple newlines
+            .replace(/[ \t]+/g, " ")   // collapse spaces/tabs
+            .replace(/\n\s+/g, "\n")   // trim leading spaces per line
+            .trim();
+    }
+    const imports = extractSection("// IMPORTS //", "// DECLARATION //");
+    const declaration = extractSection("// DECLARATION //", "// SERVICES //");
+    const services = extractSection("// SERVICES //", "// MACROS //");
+    const macros = extractSection("// MACROS //", null);
+
+    return {
+        imports,
+        declaration,
+        services,
+        macros
+    };
+}
+
+function compile_declaration(code){
+    let types = [], functions = [], exports = []
+    code = code.split('\n')
+    for (let i = 0; i < code.length; i++){
+        if (code[i].startsWith("@")){
+            types.push();
+        }
+    }
 }
 
 function formatBinary(types = [], functions = [], imports = [], exports = [], codes = [], globals = [], globalNames = [], dataSegs = [], memory = null, tmp = null){
@@ -185,4 +264,11 @@ function encodeF64(v) {
   const buf = new ArrayBuffer(8);
   new DataView(buf).setFloat64(0, v, true);
   return [...new Uint8Array(buf)];
+}
+
+function encodeWasmInstruction(instruction){
+    const bt = { empty: 0x40, i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c };
+    if (instruction in bt){
+        return bt[instruction];
+    }
 }

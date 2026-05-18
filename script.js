@@ -1,9 +1,8 @@
 // ─── Source registry ────────────────────────────────────────────────────────
-// Add entries here to expose alternative compiler / editor backends in the UI.
 
 const COMPILER_SOURCES = [
   { id: "lang_1",  label: "Language v1", path: "./compilers/lang_1.js" },
-  { id: 'lang_2', label: "Language v2", path: "./compilers/lang_2.js"}
+  { id: 'lang_2',  label: "Language v2", path: "./compilers/lang_2.js" },
 ];
 
 const EDITOR_SOURCES = [
@@ -15,7 +14,6 @@ const EDITOR_SOURCES = [
 let activeCompilerId = localStorage.getItem("wasm-compiler-src") || COMPILER_SOURCES[0].id;
 let activeEditorId   = localStorage.getItem("wasm-editor-src")   || EDITOR_SOURCES[0].id;
 
-// Mutable references so the rest of the file always calls the current version.
 let compile    = null;
 let initEditor = null;
 let editor     = null;
@@ -38,7 +36,6 @@ async function loadEditor(id) {
   localStorage.setItem("wasm-editor-src", src.id);
 }
 
-// Bootstrap: load both saved (or default) sources, then start the app.
 async function bootstrap() {
   await Promise.all([
     loadCompiler(activeCompilerId),
@@ -50,9 +47,7 @@ async function bootstrap() {
     document.getElementById("editorWrap")
   );
 
-  // Render the switcher panel to reflect restored state.
   renderSourcesPanel();
-  // Run the rest of the init logic that depends on editor/compile being ready.
   initApp();
 }
 
@@ -96,7 +91,6 @@ function renderSourcesPanel() {
       print(`<span class="c-muted">switching editor → </span><span class="c-ok">${esc(id)}</span>`);
       try {
         await loadEditor(id);
-        // Re-mount the editor with the newly loaded initEditor function.
         editor = initEditor(
           document.getElementById("code"),
           document.getElementById("editorWrap")
@@ -115,7 +109,6 @@ function renderSourcesPanel() {
 function renderSourceGroup(listId, sources, activeId, onSelect) {
   const list = document.getElementById(listId);
   if (!list) return;
-
   list.innerHTML = sources.map(src => `
     <div class="src-item${src.id === activeId ? " active" : ""}" data-id="${esc(src.id)}">
       <span class="src-item-dot"></span>
@@ -123,7 +116,6 @@ function renderSourceGroup(listId, sources, activeId, onSelect) {
       <span class="src-item-path">${esc(src.path)}</span>
     </div>
   `).join("");
-
   list.querySelectorAll(".src-item").forEach(el => {
     el.addEventListener("click", () => onSelect(el.dataset.id));
   });
@@ -132,7 +124,6 @@ function renderSourceGroup(listId, sources, activeId, onSelect) {
 // ─── The rest of the original app ────────────────────────────────────────────
 
 function initApp() {
-
   makeResizable("resizeEnv",     "sidePanel",    140, 520, "wasm-env-panel-w");
   makeResizable("resizeDocs",    "docsPanel",    140, 520, "wasm-docs-panel-w");
   makeResizable("resizeProg",    "progPanel",    140, 520, "wasm-prog-panel-w");
@@ -140,6 +131,7 @@ function initApp() {
 
   renderEnvList();
   updateLineNumbers();
+  initWorker();
 
   print(`<span class="c-info">WASM Compiler ready.</span>`);
   print(`<span class="c-muted">compile · run &lt;fn&gt; [args] · make · hex · clear · help</span>`);
@@ -185,12 +177,126 @@ function makeResizable(handleId, panelId, minW, maxW, storageKey) {
 }
 
 
+// ─── Web Worker & SharedArrayBuffer ──────────────────────────────────────────
+//
+// SharedArrayBuffer requires Cross-Origin-Isolation headers on the page:
+//   Cross-Origin-Opener-Policy: same-origin
+//   Cross-Origin-Embedder-Policy: require-corp
+//
+// Without them, new SharedArrayBuffer() throws. We detect this below and
+// fall back to a warning rather than crashing silently.
+//
+// Shared-memory layout
+//   controlSAB  Int32Array[2]
+//     [0]  signal   0 = worker blocked waiting  |  1 = input ready
+//     [1]  dataLen  byte-length written into dataSAB
+//   dataSAB  Uint8Array[4096]  — UTF-8 bytes of one stdin line
+
+let wasmWorker     = null;
+let controlSAB     = null;
+let dataSAB        = null;
+
+// Single-slot promise bridge (only one worker call in-flight at a time)
+let _workerResolve = null;
+let _workerReject  = null;
+
+function initWorker() {
+  if (!crossOriginIsolated) {
+    print(`<span class="c-warn">⚠ SharedArrayBuffer unavailable: page is not cross-origin isolated.</span>`);
+    print(`<span class="c-muted">  Add COOP/COEP headers or use a COOP-aware dev server (e.g. vite --https).</span>`);
+    print(`<span class="c-muted">  stdin (readline / getchar) will not work until this is resolved.</span>`);
+    print("");
+  }
+
+  // Allocate shared buffers (may throw if !crossOriginIsolated on some browsers)
+  try {
+    controlSAB = new SharedArrayBuffer(8);     // Int32Array[2]
+    dataSAB    = new SharedArrayBuffer(4096);  // Uint8Array[4096]
+  } catch {
+    // graceful degradation: worker will start but stdin will not block correctly
+    controlSAB = null;
+    dataSAB    = null;
+  }
+
+  _spawnWorker();
+}
+
+function _spawnWorker() {
+  if (wasmWorker) wasmWorker.terminate();
+
+  wasmWorker = new Worker("./wasm-worker.js");
+
+  wasmWorker.onmessage = ({ data: msg }) => {
+    switch (msg.type) {
+
+      // ── output from WASM (buffered by line inside worker) ─────────────────
+      case "stdout":
+        appendToPrint(msg.text);
+        break;
+
+      // ── worker is blocked on Atomics.wait, needs a line of stdin ──────────
+      case "input-request": {
+        // window.prompt runs synchronously on the main thread while the worker
+        // is parked — no race condition possible.
+        const value = window.prompt("stdin:") ?? "";
+        wasmWorker.postMessage({ type: "input-response", value });
+        break;
+      }
+
+      // ── WebAssembly.compile + instantiate finished ─────────────────────────
+      case "compiled":
+        _workerResolve?.(msg);
+        _workerResolve = _workerReject = null;
+        break;
+
+      // ── exported function returned ────────────────────────────────────────
+      case "result":
+        _workerResolve?.(msg);
+        _workerResolve = _workerReject = null;
+        break;
+
+      // ── any error from the worker ─────────────────────────────────────────
+      case "error":
+        _workerReject?.(new Error(msg.message));
+        _workerResolve = _workerReject = null;
+        break;
+    }
+  };
+
+  wasmWorker.onerror = (ev) => {
+    _workerReject?.(new Error(ev.message ?? "worker error"));
+    _workerResolve = _workerReject = null;
+  };
+
+  if (controlSAB && dataSAB) {
+    wasmWorker.postMessage({ type: "init", controlSAB, dataSAB });
+  }
+}
+
+/** Send a message to the worker and return a Promise that resolves on reply. */
+function workerSend(msg, transfer = []) {
+  return new Promise((resolve, reject) => {
+    _workerResolve = resolve;
+    _workerReject  = reject;
+    wasmWorker.postMessage(msg, transfer);
+  });
+}
+
+/** Terminate and restart the worker (e.g. to abort an infinite loop). */
+function killWorker() {
+  _workerReject?.(new Error("worker terminated"));
+  _workerResolve = _workerReject = null;
+  lastFuncExports = null;
+  _spawnWorker();
+  print(`<span class="c-warn">⚠ worker restarted — compiled module cleared</span>`);
+  print("");
+}
+
+
+// ─── Documentation panel ────────────────────────────────────────────────────
 
 const DOC_FILES = ["language_1.md"];
-const DISPLAY_NAMES = {
-  "language_1.md": "Language reference"
-};
-
+const DISPLAY_NAMES = { "language_1.md": "Language reference" };
 const docsCache = {};
 let currentDoc = null;
 
@@ -222,7 +328,6 @@ function renderDocsList() {
           <span class="docs-file-name">${esc(displayName)}</span>
       </div>`;
   }).join("");
-
   list.querySelectorAll(".docs-file-item").forEach((el) => {
     el.addEventListener("click", () => openDoc(el.dataset.doc));
   });
@@ -231,14 +336,11 @@ function renderDocsList() {
 async function openDoc(name) {
   currentDoc = name;
   renderDocsList();
-
   document.getElementById("docsFileList").style.display = "none";
   document.getElementById("docsBack").classList.add("visible");
   document.getElementById("docsHeaderTitle").textContent = name;
-
   const viewer = document.getElementById("docsViewer");
   viewer.classList.add("visible");
-
   if (typeof docsCache[name] === "string") {
     viewer.innerHTML = renderMarkdown(docsCache[name]);
     return;
@@ -247,9 +349,7 @@ async function openDoc(name) {
     showDocError(viewer, name, docsCache[name]);
     return;
   }
-
   viewer.innerHTML = `<p style="color:var(--text-muted);font-size:12px;font-family:-apple-system,'Segoe UI',sans-serif;">Loading…</p>`;
-
   try {
     const res  = await fetch(`docs/${name}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`);
@@ -288,8 +388,8 @@ function renderMarkdown(md) {
 
   md = md
     .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1>$1</h1>");
+    .replace(/^## (.+)$/gm,  "<h2>$1</h2>")
+    .replace(/^# (.+)$/gm,   "<h1>$1</h1>");
 
   md = md.replace(/^> (.+)$/gm, "<blockquote><p>$1</p></blockquote>");
   md = md.replace(/^---$/gm, "<hr>");
@@ -299,60 +399,39 @@ function renderMarkdown(md) {
   md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
 
   md = md.replace(/(^- .+(?:\n- .+)*)/gm, (block) => {
-    const items = block
-      .trim()
-      .split("\n")
-      .map((line) => `<li>${line.slice(2).trim()}</li>`)
-      .join("");
+    const items = block.trim().split("\n")
+      .map((line) => `<li>${line.slice(2).trim()}</li>`).join("");
     return `<ul>${items}</ul>`;
   });
 
   md = md.replace(
     /(\|.+\|[ \t]*\n)(\|[-| :]+\|[ \t]*\n)((?:\|.+\|[ \t]*\n?)*)/g,
     (_, head, _sep, body) => {
-      const th = head
-        .trim()
-        .split("|")
-        .filter(Boolean)
-        .map((c) => `<th>${c.trim()}</th>`)
-        .join("");
-      const rows = body
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map(
-          (r) =>
-            "<tr>" +
-            r
-              .split("|")
-              .filter(Boolean)
-              .map((c) => `<td>${c.trim()}</td>`)
-              .join("") +
-            "</tr>"
-        )
-        .join("");
+      const th = head.trim().split("|").filter(Boolean)
+        .map((c) => `<th>${c.trim()}</th>`).join("");
+      const rows = body.trim().split("\n").filter(Boolean)
+        .map((r) => "<tr>" + r.split("|").filter(Boolean)
+          .map((c) => `<td>${c.trim()}</td>`).join("") + "</tr>").join("");
       return `<table><thead><tr>${th}</tr></thead><tbody>${rows}</tbody></table>`;
     }
   );
 
-  md = md
-    .split(/\n{2,}/)
-    .map((chunk) => {
-      const t = chunk.trim();
-      if (!t) return "";
-      if (/^<(h[1-3]|ul|ol|pre|table|blockquote|hr|code)/i.test(t)) return t;
-      if (/^@@CODE_BLOCK_\d+@@$/.test(t)) return t;
-      return `<p>${t.replace(/\n/g, " ")}</p>`;
-    })
-    .join("\n");
+  md = md.split(/\n{2,}/).map((chunk) => {
+    const t = chunk.trim();
+    if (!t) return "";
+    if (/^<(h[1-3]|ul|ol|pre|table|blockquote|hr|code)/i.test(t)) return t;
+    if (/^@@CODE_BLOCK_\d+@@$/.test(t)) return t;
+    return `<p>${t.replace(/\n/g, " ")}</p>`;
+  }).join("\n");
 
   md = md.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, i) => {
-    const code = codeBlocks[i];
-    return `<pre><code>${code.trimEnd()}</code></pre>`;
+    return `<pre><code>${codeBlocks[i].trimEnd()}</code></pre>`;
   });
 
   return md;
 }
+
+// ─── Programs panel ──────────────────────────────────────────────────────────
 
 const PROG_SECTIONS = [
   {
@@ -402,7 +481,6 @@ function toggleProgPanel() {
 function renderProgList() {
   const list = document.getElementById("progFileList");
   let html = "";
-
   for (const section of PROG_SECTIONS) {
     if (!section.files.length) continue;
     html += `<div class="prog-section-label">${esc(section.label)}</div>`;
@@ -417,7 +495,6 @@ function renderProgList() {
     </div>`;
     }
   }
-
   if (userProgs.length > 0) {
     html += `<div class="prog-section-label">My Programs</div>`;
     html += userProgs.map((p, i) => {
@@ -429,26 +506,19 @@ function renderProgList() {
       </div>`;
     }).join("");
   }
-
   const totalAdminFiles = PROG_SECTIONS.reduce((n, s) => n + s.files.length, 0);
   if (!totalAdminFiles && !userProgs.length) {
     html = `<div class="env-empty">No programs yet.<br>Click + to create one.</div>`;
   }
-
   list.innerHTML = html;
-
   list.querySelectorAll(".prog-file-item").forEach((el) => {
     el.addEventListener("click", async (e) => {
       if (e.target.classList.contains("prog-del-btn")) return;
-      if (el.dataset.user === "1") {
-        loadUserProg(Number(el.dataset.idx));
-      } else {
-        await loadAdminProg(el.dataset.name);
-      }
+      if (el.dataset.user === "1") loadUserProg(Number(el.dataset.idx));
+      else await loadAdminProg(el.dataset.name);
       editor.refresh();
     });
   });
-
   list.querySelectorAll(".prog-del-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -469,7 +539,6 @@ async function loadAdminProg(id) {
   autoSaveCurrentProg();
   activeProg = { name: id, isUser: false };
   renderProgList();
-
   if (typeof progsCache[id] === "string") {
     document.getElementById("code").value = progsCache[id];
     updateLineNumbers();
@@ -477,7 +546,6 @@ async function loadAdminProg(id) {
     print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(file ? file.name : id)}</span>`);
     return;
   }
-
   print(`<span class="c-muted">loading…</span>`);
   try {
     const res  = await fetch(`programs/${id}`);
@@ -557,7 +625,7 @@ function createNewProg() {
   print("");
 }
 
-
+// ─── Env imports ─────────────────────────────────────────────────────────────
 
 let envImports = [
   { name: "pow", sig: "i32 i32 => i32", body: "return Math.pow(a, b)|0;" },
@@ -592,31 +660,27 @@ function renderEnvList() {
         </div>`,
     )
     .join("");
-
   list.querySelectorAll(".env-item").forEach((el) => {
     el.addEventListener("click", () => selectEnv(Number(el.dataset.idx)));
   });
-
   list.querySelectorAll(".env-action-btn").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const idx = Number(btn.dataset.idx);
-      if (btn.dataset.action === "edit")   editEnv(idx);
+      if (btn.dataset.action === "edit")        editEnv(idx);
       else if (btn.dataset.action === "delete") deleteEnv(idx);
     });
   });
 }
 
 function selectEnv(i) {
-  document
-    .querySelectorAll(".env-item")
+  document.querySelectorAll(".env-item")
     .forEach((el, j) => el.classList.toggle("selected", j === i));
 }
 
 function openForm(idx = null) {
   editingIdx = idx;
-  document.getElementById("envFormTitle").textContent =
-    idx === null ? "New Import" : "Edit Import";
+  document.getElementById("envFormTitle").textContent = idx === null ? "New Import" : "Edit Import";
   const e = idx !== null ? envImports[idx] : { name: "", sig: "", body: "" };
   document.getElementById("envName").value = e.name;
   document.getElementById("envSig").value  = e.sig;
@@ -654,47 +718,6 @@ function saveEnv() {
   print("");
 }
 
-function buildEnvObject() {
-  const env = {}, argNames = ["a", "b", "c", "d", "e", "f", "g", "h"];
-
-  env.putchar = (a) => { console.stdout(String.fromCharCode(a)); };
-
-  env.readline = (addr, maxLen) => {
-    const input   = window.prompt("stdin:") ?? "";
-    const encoded = new TextEncoder().encode(input);
-    const n       = Math.min(encoded.length, Math.max(0, maxLen - 1));
-    const mem     = new Uint8Array(lastInstance.exports.memory.buffer);
-    mem.set(encoded.subarray(0, n), addr);
-    mem[addr + n] = 0;
-    return n;
-  };
-
-  let _charBuf = [], _charPos = 0;
-  env.getchar = () => {
-    if (_charPos >= _charBuf.length) {
-      const input = window.prompt("stdin:") ?? "";
-      if (input === null) return -1;
-      _charBuf = Array.from(new TextEncoder().encode(input + "\n"));
-      _charPos = 0;
-    }
-    return _charBuf[_charPos++];
-  };
-
-  for (const imp of envImports) {
-    if (imp.name in env) continue;
-    const parts = imp.sig.split("=>")[0].trim().split(/\s+/).filter(Boolean);
-    const args  = argNames.slice(0, parts.length);
-    try {
-      env[imp.name] = new Function(...args, imp.body || "return 0;");
-    } catch (err) {
-      throw new Error(`env.${imp.name}: ${err.message}`);
-    }
-  }
-
-  return env;
-}
-
-
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
 document.getElementById("activityEnv").addEventListener("click",     toggleEnvPanel);
@@ -724,12 +747,17 @@ document.getElementById("code").addEventListener("input", () => {
 });
 
 
-
 // ─── Terminal ────────────────────────────────────────────────────────────────
 
 const termOutput = document.getElementById("termOutput");
 const termInput  = document.getElementById("termInput");
-let cmdHistory = [], histIdx = -1, lastBinary = null, lastInstance = null, lastMeta = {};
+let cmdHistory = [], histIdx = -1;
+
+// lastBinary  — kept on main thread for the `hex` command
+// lastFuncExports — function-export names reported by the worker after compile
+let lastBinary      = null;
+let lastMeta        = {};
+let lastFuncExports = null;   // null means no compiled module in worker
 
 function esc(s) {
   return String(s)
@@ -766,7 +794,6 @@ async function gatherLibs(code) {
     if (!m) continue;
     const name = m[1].trim();
     if (name in libs) continue;
-
     const userProg = userProgs.find(p => p.name === name);
     if (userProg) {
       libs[name] = userProg.code;
@@ -784,8 +811,6 @@ async function gatherLibs(code) {
   return libs;
 }
 
-console.stdout = appendToPrint;
-
 async function runCommand(raw, isInternal = false) {
   const cmd = raw.trim();
   if (!cmd) return;
@@ -798,18 +823,28 @@ async function runCommand(raw, isInternal = false) {
 
   const parts = cmd.split(/\s+/), verb = parts[0].toLowerCase();
 
+  // ── help ───────────────────────────────────────────────────────────────────
   if (verb === "help") {
     print(`<span class="c-muted">  compile         — compile only</span>`);
-    print(`<span class="c-muted">  run fn [args] — call exported function</span>`);
-    print(`<span class="c-muted">  boot [args]   — compile &amp; run "main" with given args</span>`);
-    print(`<span class="c-muted">  hex           — full hex dump of binary</span>`);
-    print(`<span class="c-muted">  clear         — clear terminal</span>`);
+    print(`<span class="c-muted">  run fn [args]   — call exported function</span>`);
+    print(`<span class="c-muted">  boot [args]     — compile &amp; run "main" with given args</span>`);
+    print(`<span class="c-muted">  make [args]     — compile &amp; run all exports</span>`);
+    print(`<span class="c-muted">  hex             — full hex dump of binary</span>`);
+    print(`<span class="c-muted">  kill            — terminate worker (stops infinite loops)</span>`);
+    print(`<span class="c-muted">  clear           — clear terminal</span>`);
   }
 
+  // ── clear ──────────────────────────────────────────────────────────────────
   else if (verb === "clear") {
     termOutput.innerHTML = "";
   }
 
+  // ── kill: abort a hung worker ──────────────────────────────────────────────
+  else if (verb === "kill") {
+    killWorker();
+  }
+
+  // ── compile ────────────────────────────────────────────────────────────────
   else if (verb === "compile") {
     const code = document.getElementById("code").value;
     if (!code.trim()) { print(`<span class="c-err">editor is empty</span>`); return; }
@@ -817,15 +852,17 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-muted">compiling…</span>`);
 
     try {
+      // Compile on the main thread (same as before — just produces a binary)
       const libs   = await gatherLibs(code);
       const binary = compile(code, libs);
       if (!binary) throw new Error("compile() returned null");
 
-      lastBinary = binary;
-      lastMeta   = binary.meta || {};
+      lastBinary      = binary;
+      lastMeta        = binary.meta || {};
+      lastFuncExports = null;   // invalidate until worker confirms
 
+      // Show byte count + hex preview
       print(`<span class="c-ok">✓ ${binary.length} bytes</span>`);
-
       let hex = "";
       const lim = Math.min(binary.length, 48);
       for (let i = 0; i < lim; i++)
@@ -834,77 +871,82 @@ async function runCommand(raw, isInternal = false) {
         hex += `<span class="c-muted">… +${binary.length - 48}</span>`;
       print(`<span class="c-hex">${hex}</span>`);
 
-      const mod  = await WebAssembly.compile(binary);
-      lastInstance = await WebAssembly.instantiate(mod, { env: buildEnvObject() });
+      // Hand binary + env config to the worker for WebAssembly.instantiate()
+      // We copy (not transfer) so lastBinary stays valid for `hex` command.
+      const result = await workerSend({
+        type:       "compile",
+        binary:     binary,
+        envImports: envImports,
+      });
 
-      const exps = Object.keys(lastInstance.exports);
-      print(`<span class="c-muted">exports: </span><span class="c-ok">${exps.map(esc).join(", ")}</span>`);
+      lastFuncExports = result.funcExports;
+      print(`<span class="c-muted">exports: </span><span class="c-ok">${result.allExports.map(esc).join(", ")}</span>`);
 
-    } catch (e) {
-      print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
+    } catch (err) {
+      lastFuncExports = null;
+      print(`<span class="c-err">✗ ${esc(err.message)}</span>`);
     }
   }
 
+  // ── make: compile then run every exported function ─────────────────────────
   else if (verb === "make") {
     await runCommand("compile", true);
     print("");
-    if (!lastInstance) return;
+    if (!lastFuncExports) return;
 
     const supplied = parts.slice(1).map(Number);
-    const exps     = Object.keys(lastInstance.exports);
-
-    for (const fn of exps) {
-      if (typeof lastInstance.exports[fn] !== "function") continue;
+    for (const fn of lastFuncExports) {
       const needed   = lastMeta[fn] ?? supplied.length;
       const testArgs = Array.from({ length: needed }, (_, i) =>
-        i < supplied.length ? supplied[i] : 0,
+        i < supplied.length ? supplied[i] : 0
       );
       await runCommand(`run ${fn} ${testArgs.join(" ")}`, true);
     }
   }
 
+  // ── run: call a specific exported function ─────────────────────────────────
   else if (verb === "run") {
-    if (!lastInstance) { print(`<span class="c-warn">⚠ run build/make first</span>`); return; }
+    if (!lastFuncExports) { print(`<span class="c-warn">⚠ run build/make first</span>`); return; }
 
-    const fn   = parts[1], args = parts.slice(2).map(Number);
+    const fn   = parts[1];
+    const args = parts.slice(2).map(Number);
     if (!fn) { print(`<span class="c-err">usage: run &lt;fn&gt; [args]</span>`); return; }
 
-    const func = lastInstance.exports[fn];
-    if (!func || typeof func !== "function") {
+    if (!lastFuncExports.includes(fn)) {
       print(`<span class="c-err">✗ no export "${esc(fn)}"</span>`);
       return;
     }
 
     try {
       print(`<span class="c-muted">Running function ${esc(fn)}(${args.join(", ")})</span>`);
-      print('');
-      const r = func(...args);
-      print(`<span class="c-muted">  ${esc(fn)}(${args.join(", ")}) → </span><span class="c-ok">${r}</span>`);
-    } catch (e) {
-      print(`<span class="c-err">✗ ${esc(e.message)}</span>`);
+      print("");
+      const result = await workerSend({ type: "run", fn, args });
+      print(`<span class="c-muted">  ${esc(fn)}(${args.join(", ")}) → </span><span class="c-ok">${result.result}</span>`);
+    } catch (err) {
+      print(`<span class="c-err">✗ ${esc(err.message)}</span>`);
     }
   }
 
+  // ── boot: compile then run main() ─────────────────────────────────────────
   else if (verb === "boot") {
     await runCommand("compile", true);
     print("");
-    if (!lastInstance) return;
+    if (!lastFuncExports) return;
 
-    const supplied = parts.slice(1).map(Number);
-    const fn       = "main";
-
-    if (typeof lastInstance.exports[fn] !== "function") {
-      print(`No "${fn}" function found`);
+    if (!lastFuncExports.includes("main")) {
+      print(`No "main" function found`);
       return;
     }
 
-    const needed   = lastMeta[fn] ?? supplied.length;
+    const supplied = parts.slice(1).map(Number);
+    const needed   = lastMeta["main"] ?? supplied.length;
     const testArgs = Array.from({ length: needed }, (_, i) =>
-      i < supplied.length ? supplied[i] : 0,
+      i < supplied.length ? supplied[i] : 0
     );
-    await runCommand(`run ${fn} ${testArgs.join(" ")}`, true);
+    await runCommand(`run main ${testArgs.join(" ")}`, true);
   }
 
+  // ── hex: dump the last compiled binary ────────────────────────────────────
   else if (verb === "hex") {
     if (!lastBinary) { print(`<span class="c-warn">⚠ run build first</span>`); return; }
     let row = "";
@@ -937,12 +979,20 @@ termInput.addEventListener("keydown", (e) => {
 
 document.getElementById("panel").addEventListener("click", () => termInput.focus());
 
+// Ctrl/Cmd+Enter: compile & run
+codeEl.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    e.preventDefault();
+    runCommand("make");
+    termInput.focus();
+  }
+});
 
 
 // ─── Line numbers & minimap ───────────────────────────────────────────────────
 
-const codeEl    = document.getElementById("code");
-const lineNums  = document.getElementById("lineNumbers");
+const codeEl     = document.getElementById("code");
+const lineNums   = document.getElementById("lineNumbers");
 const editorWrap = document.getElementById("editorWrap");
 
 function getCursorLine() {
@@ -955,8 +1005,8 @@ function updateLineNumbers() {
   let html    = "";
   for (let i = 1; i <= lines.length; i++)
     html += `<span class="line-number${i === cur ? " active" : ""}">${i}</span>`;
-  lineNums.innerHTML      = html;
-  lineNums.scrollTop      = editorWrap.scrollTop;
+  lineNums.innerHTML = html;
+  lineNums.scrollTop = editorWrap.scrollTop;
   updateMinimap();
 }
 
@@ -974,11 +1024,6 @@ codeEl.addEventListener("keydown", (e) => {
     codeEl.value = codeEl.value.substring(0, s) + "    " + codeEl.value.substring(end);
     codeEl.selectionStart = codeEl.selectionEnd = s + 4;
     updateLineNumbers();
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-    e.preventDefault();
-    runCommand("make");
-    termInput.focus();
   }
 });
 
