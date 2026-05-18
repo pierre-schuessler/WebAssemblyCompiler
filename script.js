@@ -630,7 +630,7 @@ function createNewProg() {
 let envImports = [
   { name: "pow", sig: "i32 i32 => i32", body: "return Math.pow(a, b)|0;" },
   { name: "log", sig: "i32 => i32",     body: "console.log(a); return a;" },
-];
+  { name: "sleep", sig: "i32 => i32", body: "const target = Date.now() + a; const ctrl = new Int32Array(controlSAB); while (Date.now() < target) { Atomics.wait(ctrl, 0, 1, 10); } return 0;"}];
 let editingIdx = null;
 
 function toggleEnvPanel() {
