@@ -1231,3 +1231,14 @@ body.dragging-panel .resize-handle {
 .src-item.active .src-item-path {
   opacity: 1;
 }
+
+.term-stdin {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--text-muted);
+  color: var(--c-ok, #8fc);
+  font: inherit;
+  outline: none;
+  width: 240px;
+  caret-color: currentColor;
+}

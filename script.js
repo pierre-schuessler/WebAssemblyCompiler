@@ -236,10 +236,25 @@ function _spawnWorker() {
 
       // ── worker is blocked on Atomics.wait, needs a line of stdin ──────────
       case "input-request": {
-        // window.prompt runs synchronously on the main thread while the worker
-        // is parked — no race condition possible.
-        const value = window.prompt("stdin:") ?? "";
-        wasmWorker.postMessage({ type: "input-response", value });
+        termInput.disabled = true;
+
+        const row = document.createElement("div");
+        row.className = "term-line";
+        row.innerHTML = `<span class="c-muted">stdin › </span><input class="term-stdin" type="text" autocomplete="off" spellcheck="false">`;
+        termOutput.appendChild(row);
+        termOutput.scrollTop = termOutput.scrollHeight;
+
+        const field = row.querySelector(".term-stdin");
+        field.focus();
+
+        field.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter") return;
+          const value = field.value;
+          row.innerHTML = `<span class="c-muted">stdin › </span><span class="c-ok">${esc(value)}</span>`;
+          termInput.disabled = false;
+          termInput.focus();
+          wasmWorker.postMessage({ type: "input-response", value });
+        });
         break;
       }
 
@@ -287,11 +302,12 @@ function killWorker() {
   _workerReject?.(new Error("worker terminated"));
   _workerResolve = _workerReject = null;
   lastFuncExports = null;
+  termInput.disabled = false;          // ← add this
+  document.querySelector(".term-stdin")?.closest(".term-line")?.remove();  // ← and this
   _spawnWorker();
   print(`<span class="c-warn">⚠ worker restarted — compiled module cleared</span>`);
   print("");
 }
-
 
 // ─── Documentation panel ────────────────────────────────────────────────────
 
@@ -630,7 +646,10 @@ function createNewProg() {
 let envImports = [
   { name: "pow", sig: "i32 i32 => i32", body: "return Math.pow(a, b)|0;" },
   { name: "log", sig: "i32 => i32",     body: "console.log(a); return a;" },
-  { name: "sleep", sig: "i32 => i32", body: "const target = Date.now() + a; const ctrl = new Int32Array(controlSAB); while (Date.now() < target) { Atomics.wait(ctrl, 0, 1, 10); } return 0;"}];
+  { name: "sleep", sig: "i32 => i32", body: "const target = Date.now() + a; const ctrl = new Int32Array(controlSAB); while (Date.now() < target) { Atomics.wait(ctrl, 0, 1, 10); } return 0;"},
+  { name: "readline", sig: "i32 i32 => i32", body: "return env.readline(a, b);"}
+];
+
 let editingIdx = null;
 
 function toggleEnvPanel() {
