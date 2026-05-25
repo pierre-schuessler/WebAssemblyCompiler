@@ -8,7 +8,7 @@ export function compile(code, libs = {}) {
     dataSegs    = [],
     memory      = null;
 
-    let [import_code, declaration_code, services_code, macros_code] = cleanup(code);
+    let import_code, declaration_code, services_code, macros_code = cleanup(code);
     let executable_code = merge_executables(services_code, macros_code);
 
     compile_imports(import_code, imports);
