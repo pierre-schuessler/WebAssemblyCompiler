@@ -115,7 +115,7 @@ function compile_imports(code, imports){
 }
 
 function compile_declaration(code, functions, exports){
-    service_name = null
+    let service_name = null
     const lines = code.split("\n")
     lines.forEach((line)=>{
         if (line.startsWith("@")) service_name = line.substring(1)
