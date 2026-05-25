@@ -1,3 +1,22 @@
+class PreprocessError extends Error {
+  /**
+   * @param {string} message   Human-readable description
+   * @param {string} stage     Pipeline stage where the error occurred
+   * @param {string} [line]    Source line that triggered the error (optional)
+   * @param {number} [lineNo]  1-based line index in the *original* source (optional)
+   */
+  constructor(message, stage, line = null, lineNo = null) {
+    const loc  = lineNo != null ? ` (line ${lineNo})` : "";
+    const src  = line   != null ? `\n  → ${line}`     : "";
+    super(`[${stage}]${loc} ${message}${src}`);
+    this.name      = "PreprocessError";
+    this.stage     = stage;
+    this.sourceLine = line;
+    this.lineNo    = lineNo;
+  }
+}
+
+
 export function compile(code, libs = {}) {
 
     let functions   = [],
@@ -12,8 +31,8 @@ export function compile(code, libs = {}) {
     let executable_code = merge_executables(services_code, macros_code);
 
     compile_imports(import_code, imports);
-    compile_declaration(declaration_code);
-    compile_executables(executable_code);
+    compile_declaration(declaration_code, functions, exports);
+    compile_executables(executable_code, functions, codes);
 
     const exportsForBinary = {};
     const meta = {};
@@ -63,6 +82,11 @@ function cleanup(input) {
         services,
         macros
     };
+}
+
+function merge_executables(executable1, executable2){
+    if (!executable2.trim()) throw new PreprocessError("Macros are not supported yet. Please remove any macro code.", "merge_executables")
+    return executable1;
 }
 
 function compile_imports(code, imports){
