@@ -326,8 +326,16 @@ let _wabt = null;
 async function getWabt() {
   if (_wabt) return _wabt;
   print(`<span class="c-muted">loading wabt…</span>`);
-  const mod = await import("https://unpkg.com/wabt@1.0.35/index.js");
-  _wabt = await mod.default();
+  if (!window.WabtModule) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://unpkg.com/wabt@1.0.35/index.js";
+      s.onload = resolve;
+      s.onerror = () => reject(new Error("failed to load wabt.js from unpkg"));
+      document.head.appendChild(s);
+    });
+  }
+  _wabt = await window.WabtModule();
   return _wabt;
 }
 
