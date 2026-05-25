@@ -114,6 +114,8 @@ function compile_imports(code, imports){
     })
 }
 
+function compile_declaration(code, functions, exports){}
+function compile_executables(executable_code, functions, codes){}
 
 
 
