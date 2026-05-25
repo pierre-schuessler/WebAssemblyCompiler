@@ -114,7 +114,31 @@ function compile_imports(code, imports){
     })
 }
 
-function compile_declaration(code, functions, exports){}
+function compile_declaration(code, functions, exports){
+    service_name = null
+    const lines = code.split("\n")
+    lines.forEach((line)=>{
+        if (line.startsWith("@")) service_name = line.substring(1)
+        else {
+            if (!service_name) throw new PreprocessError("The declaration part must start with the opening of a new service via the @ syntax", "compile_declaration")
+            const [definitionPart, outputPart] = line.split('=>').map(s => s.trim());
+
+            const [name, inputPart] = definitionPart.split(':').map(s => s.trim());
+
+            const extractTypes = (typeString) => {
+                if (!typeString) return [];
+                const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
+                return matches.map(match => encodeWasmInstruction(match[1]));
+            };
+
+            functions.push({
+                input: extractTypes(inputPart),
+                output: extractTypes(outputPart)
+            })
+            exports[name] = functions.length - 1
+        }
+    })
+}
 function compile_executables(executable_code, functions, codes){}
 
 
