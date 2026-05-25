@@ -134,7 +134,7 @@ function initApp() {
   initWorker();
 
   print(`<span class="c-info">WASM Compiler ready.</span>`);
-  print(`<span class="c-muted">compile · run &lt;fn&gt; [args] · make · hex · clear · help</span>`);
+  print(`<span class="c-muted">compile · run &lt;fn&gt; [args] · make · hex · wat · clear · help</span>`);
   print("");
 }
 
@@ -312,11 +312,23 @@ function killWorker() {
   _workerReject?.(new Error("worker terminated"));
   _workerResolve = _workerReject = null;
   lastFuncExports = null;
-  termInput.disabled = false;          // ← add this
-  document.querySelector(".term-stdin")?.closest(".term-line")?.remove();  // ← and this
+  termInput.disabled = false;
+  document.querySelector(".term-stdin")?.closest(".term-line")?.remove();
   _spawnWorker();
   print(`<span class="c-warn">⚠ worker restarted — compiled module cleared</span>`);
   print("");
+}
+
+// ─── WABT (WAT decompiler) ───────────────────────────────────────────────────
+
+let _wabt = null;
+
+async function getWabt() {
+  if (_wabt) return _wabt;
+  print(`<span class="c-muted">loading wabt…</span>`);
+  const mod = await import("https://unpkg.com/wabt@1.0.35/index.js");
+  _wabt = await mod.default();
+  return _wabt;
 }
 
 // ─── Documentation panel ────────────────────────────────────────────────────
@@ -782,7 +794,7 @@ const termOutput = document.getElementById("termOutput");
 const termInput  = document.getElementById("termInput");
 let cmdHistory = [], histIdx = -1;
 
-// lastBinary  — kept on main thread for the `hex` command
+// lastBinary  — kept on main thread for the `hex` and `wat` commands
 // lastFuncExports — function-export names reported by the worker after compile
 let lastBinary      = null;
 let lastMeta        = {};
@@ -859,6 +871,7 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-muted">  boot [args]     — compile &amp; run "main" with given args</span>`);
     print(`<span class="c-muted">  make [args]     — compile &amp; run all exports</span>`);
     print(`<span class="c-muted">  hex             — full hex dump of binary</span>`);
+    print(`<span class="c-muted">  wat             — disassemble binary to WebAssembly Text Format</span>`);
     print(`<span class="c-muted">  kill            — terminate worker (stops infinite loops)</span>`);
     print(`<span class="c-muted">  clear           — clear terminal</span>`);
   }
@@ -901,7 +914,7 @@ async function runCommand(raw, isInternal = false) {
       print(`<span class="c-hex">${hex}</span>`);
 
       // Hand binary + env config to the worker for WebAssembly.instantiate()
-      // We copy (not transfer) so lastBinary stays valid for `hex` command.
+      // We copy (not transfer) so lastBinary stays valid for `hex` and `wat` commands.
       const result = await workerSend({
         type:       "compile",
         binary:     binary,
@@ -977,11 +990,28 @@ async function runCommand(raw, isInternal = false) {
 
   // ── hex: dump the last compiled binary ────────────────────────────────────
   else if (verb === "hex") {
-    if (!lastBinary) { print(`<span class="c-warn">⚠ run build first</span>`); return; }
+    if (!lastBinary) { print(`<span class="c-warn">⚠ run compile first</span>`); return; }
     let row = "";
     for (let i = 0; i < lastBinary.length; i++)
       row += lastBinary[i].toString(16).padStart(2, "0").toUpperCase() + " ";
     if (row) print(`<span class="c-hex">${row}</span>`);
+  }
+
+  // ── wat: disassemble last compiled binary to WebAssembly Text Format ───────
+  else if (verb === "wat") {
+    if (!lastBinary) { print(`<span class="c-warn">⚠ run compile first</span>`); return; }
+    try {
+      const wabt   = await getWabt();
+      const module = wabt.readWasm(lastBinary, { readDebugNames: true });
+      module.generateNames();
+      module.applyNames();
+      const text = module.toText({ foldExprs: false, inlineExport: true });
+      module.destroy();
+      for (const line of text.split("\n"))
+        print(`<span class="c-hex">${esc(line)}</span>`);
+    } catch (err) {
+      print(`<span class="c-err">✗ ${esc(err.message)}</span>`);
+    }
   }
 
   else {
