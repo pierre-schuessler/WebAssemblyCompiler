@@ -31,7 +31,7 @@ export function compile(code, libs = {}) {
     let executable_code = merge_executables(services_code, macros_code);
 
     compile_imports(import_code, imports);
-    compile_declaration(declaration_code, functions, exports);
+    compile_declaration(declaration_code, functions, exports, imports.length);
     compile_executables(executable_code, functions, codes);
 
     const exportsForBinary = {};
@@ -114,7 +114,7 @@ function compile_imports(code, imports){
     })
 }
 
-function compile_declaration(code, functions, exports){
+function compile_declaration(code, functions, exports, AmountOfImports){
     let service_name = null
     const lines = code.split("\n")
     lines.forEach((line)=>{
@@ -137,7 +137,7 @@ function compile_declaration(code, functions, exports){
             })
             exports.push({
                 name: name,
-                index: imports.length + (functions.length - 1)
+                index: AmountOfImports + (functions.length - 1)
             });
         }
     })
