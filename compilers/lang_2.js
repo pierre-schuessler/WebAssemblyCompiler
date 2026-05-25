@@ -135,7 +135,10 @@ function compile_declaration(code, functions, exports){
                 input: extractTypes(inputPart),
                 output: extractTypes(outputPart)
             })
-            exports[name] = functions.length - 1
+            exports.push({
+                name: name,
+                index: imports.length + (functions.length - 1)
+            });
         }
     })
 }
