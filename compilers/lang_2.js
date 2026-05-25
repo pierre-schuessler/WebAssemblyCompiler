@@ -118,7 +118,7 @@ function compile_declaration(code, functions, exports, AmountOfImports){
     let service_name = null
     const lines = code.split("\n")
     lines.forEach((line)=>{
-        if (line.startsWith("@")) service_name = line.substring(1)
+        if (line.startsWith("@")) service_name = line.substring(1).trim()
         else {
             if (!service_name) throw new PreprocessError("The declaration part must start with the opening of a new service via the @ syntax", "compile_declaration")
             const [definitionPart, outputPart] = line.split('=>').map(s => s.trim());
@@ -136,7 +136,7 @@ function compile_declaration(code, functions, exports, AmountOfImports){
                 output: extractTypes(outputPart)
             })
             exports.push({
-                name: name,
+                name: service_name.concat(".", name),
                 index: AmountOfImports + (functions.length - 1)
             });
         }
