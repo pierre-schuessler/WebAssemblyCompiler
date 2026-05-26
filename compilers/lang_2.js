@@ -50,6 +50,11 @@ export function compile(code, libs = {}) {
 }
 
 function cleanup(input) {
+    input = input
+    .split("\n")
+    .map(l => l.replace(/\/\/.*$/, "").trim())
+    .filter(l => l.length > 0).join("\n");
+    
     const code = input.replace(/\r\n/g, "\n").trim();
 
     function extractSection(startTag, endTag) {
@@ -172,10 +177,13 @@ function compile_executables(code, functions, executables) {
 
     let service_name;
     let function_index;
+    let depth = 0;
     const lines = code.split("\n");
 
     lines.forEach((line) => {
         if (!line.trim()) return;
+        let isDepth0Line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ")
+        if (isDepth0Line && !(depth == 0)) throw new CompilationError("You must close one function before beginning another.", "compile_executables", line)
 
         if (line.startsWith("@")) {
             service_name = line.substring(1).trim();
@@ -198,23 +206,28 @@ function compile_executables(code, functions, executables) {
             executables[function_index] = { locals: [], binary: [] };
         } else {
             // TODO: compile instruction line and push into executables[function_index]
-            const inst = line.trim();
-            const binary = executables[function_index].binary;
+            if (line == '{') depth++;
+            else if (line == '}') depth--;
+            else{
+                const inst = line.trim();
+                const binary = executables[function_index].binary;
 
-            if (inst === "end") {
-                binary.push(0x0b); // Wasm function terminator
-            } else if (inst === "nop") {
-                binary.push(0x01); // Do nothing
-            } else if (inst.startsWith("i32.const")) {
-                const val = parseInt(inst.split(" ")[1], 10);
-                binary.push(0x41, ...encodeSLEB128(val)); // Push integer to stack
-            } else {
-                throw new CompilationError(
-                    `Unknown instruction: ${inst}`, 
-                    "compile_executables", 
-                    line
-                );
+                if (inst === "end") {
+                    binary.push(0x0b); // Wasm function terminator
+                } else if (inst === "nop") {
+                    binary.push(0x01); // Do nothing
+                } else if (inst.startsWith("i32.const")) {
+                    const val = parseInt(inst.split(" ")[1], 10);
+                    binary.push(0x41, ...encodeSLEB128(val)); // Push integer to stack
+                } else {
+                    throw new CompilationError(
+                        `Unknown instruction: ${inst}`, 
+                        "compile_executables", 
+                        line
+                    );
+                }
             }
+            
         }
     });
 }
