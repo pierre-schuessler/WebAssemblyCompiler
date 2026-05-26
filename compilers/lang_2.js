@@ -122,8 +122,7 @@ function compile_declaration(code, functions, exports, AmountOfImports){
         else {
             if (!service_name) throw new PreprocessError("The declaration part must start with the opening of a new service via the @ syntax", "compile_declaration")
             
-            if (line.startsWith("internal ")) clean_line = line.substring(9)
-            else if (line.startsWith("enpoint ")) clean_line = line.substring(8)
+            if (line.startsWith("internal ") || line.startsWith("endpoint ")) clean_line = line.substring(9)
             else throw new PreprocessError("Declartions must either be an endpoint or internal.", "compile_declaration")
             
             const [definitionPart, outputPart] = line.split('=>').map(s => s.trim());
@@ -140,10 +139,13 @@ function compile_declaration(code, functions, exports, AmountOfImports){
                 input: extractTypes(inputPart),
                 output: extractTypes(outputPart)
             })
-            exports.push({
-                name: service_name.concat(".", name),
-                index: AmountOfImports + (functions.length - 1)
-            });
+            if (line.startsWith("endpoint ")){
+                exports.push({
+                    name: service_name.concat(".", name),
+                    index: AmountOfImports + (functions.length - 1)
+                });
+            }
+            
         }
     })
 }
