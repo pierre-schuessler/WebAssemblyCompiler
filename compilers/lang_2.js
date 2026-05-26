@@ -1,4 +1,4 @@
-class PreprocessError extends Error {
+class CompilationError extends Error {
   /**
    * @param {string} message   Human-readable description
    * @param {string} stage     Pipeline stage where the error occurred
@@ -9,7 +9,7 @@ class PreprocessError extends Error {
     const loc  = lineNo != null ? ` (line ${lineNo})` : "";
     const src  = line   != null ? `\n  → ${line}`     : "";
     super(`[${stage}]${loc} ${message}${src}`);
-    this.name       = "PreprocessError";
+    this.name       = "CompilationError";
     this.stage      = stage;
     this.sourceLine = line;
     this.lineNo     = lineNo;
@@ -81,7 +81,7 @@ function cleanup(input) {
 }
 
 function merge_executables(executable1, executable2) {
-    if (executable2.trim()) throw new PreprocessError(
+    if (executable2.trim()) throw new CompilationError(
         "Macros are not supported yet. Please remove any macro code.",
         "merge_executables"
     );
@@ -127,7 +127,7 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
             return;
         }
 
-        if (!service_name) throw new PreprocessError(
+        if (!service_name) throw new CompilationError(
             "The declaration part must start with the opening of a new service via the @ syntax",
             "compile_declaration"
         );
@@ -135,7 +135,7 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
         let clean_line;
         if      (line.startsWith("internal ")) clean_line = line.substring(9);
         else if (line.startsWith("endpoint "))  clean_line = line.substring(9);
-        else throw new PreprocessError(
+        else throw new CompilationError(
             "Declarations must either be an endpoint or internal.",
             "compile_declaration"
         );
@@ -181,7 +181,7 @@ function compile_executables(code, functions, executables) {
             service_name = line.substring(1).trim();
         } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
             const match = line.substring(9).match(/([a-zA-Z_$][\w$]*)\s*\(/);
-            if (!match) throw new PreprocessError(
+            if (!match) throw new CompilationError(
                 "You must specify the name of the function",
                 "compile_executables",
                 line
@@ -190,7 +190,7 @@ function compile_executables(code, functions, executables) {
             const key = `${service_name}.${match[1]}`;
             function_index = executables.indexOf(key);
 
-            if (function_index === -1) throw new PreprocessError(
+            if (function_index === -1) throw new CompilationError(
                 `Function "${key}" was not found in the declaration`,
                 "compile_executables"
             );
@@ -209,7 +209,7 @@ function compile_executables(code, functions, executables) {
                 const val = parseInt(inst.split(" ")[1], 10);
                 binary.push(0x41, ...encodeSLEB128(val)); // Push integer to stack
             } else {
-                throw new PreprocessError(
+                throw new CompilationError(
                     `Unknown instruction: ${inst}`, 
                     "compile_executables", 
                     line
@@ -338,6 +338,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
 
         const bodies = executables.map((fn, fnIdx) => {
             const paramCount  = functions[fnIdx].input.length;
+            if (typeof fn === 'string' || fn instanceof String) throw new CompilationError(`Could not find an executable for ${fn}`, "formatBinary")
             const localValues = fn.locals.slice(paramCount).map(([_, valtype]) => valtype);
 
             const groups = [];
