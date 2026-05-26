@@ -9,10 +9,10 @@ class PreprocessError extends Error {
     const loc  = lineNo != null ? ` (line ${lineNo})` : "";
     const src  = line   != null ? `\n  → ${line}`     : "";
     super(`[${stage}]${loc} ${message}${src}`);
-    this.name      = "PreprocessError";
-    this.stage     = stage;
+    this.name       = "PreprocessError";
+    this.stage      = stage;
     this.sourceLine = line;
-    this.lineNo    = lineNo;
+    this.lineNo     = lineNo;
   }
 }
 
@@ -20,25 +20,25 @@ class PreprocessError extends Error {
 export function compile(code, libs = {}) {
 
     let functions   = [],
-    imports     = [], 
-    exports     = [],
-    executables = [],
-    globals     = [],
-    dataSegs    = [],
-    memory      = null;
+        imports     = [],
+        exports     = [],
+        executables = [],
+        globals     = [],
+        dataSegs    = [],
+        memory      = null;
 
     let { imports: import_code, declaration: declaration_code, services: services_code, macros: macros_code } = cleanup(code);
     let executable_code = merge_executables(services_code, macros_code);
 
     compile_imports(import_code, imports);
-    compile_declaration(declaration_code, functions, exports, imports.length);
+    compile_declaration(declaration_code, functions, exports, imports.length, executables);
     compile_executables(executable_code, functions, executables);
 
     const exportsForBinary = {};
     const meta = {};
 
     exports.forEach((e, idx) => {
-        exportsForBinary[e.name] = e.index !== undefined ? e.index : idx; 
+        exportsForBinary[e.name] = e.index !== undefined ? e.index : idx;
         meta[e.name] = e.signature;
     });
 
@@ -71,34 +71,35 @@ function cleanup(input) {
             .replace(/\n\s+/g, "\n")
             .trim();
     }
-    const imports = extractSection("// IMPORTS //", "// DECLARATION //");
-    const declaration = extractSection("// DECLARATION //", "// SERVICES //");
-    const services = extractSection("// SERVICES //", "// MACROS //");
-    const macros = extractSection("// MACROS //", null);
 
-    return {
-        imports,
-        declaration,
-        services,
-        macros
-    };
+    const imports     = extractSection("// IMPORTS //",     "// DECLARATION //");
+    const declaration = extractSection("// DECLARATION //", "// SERVICES //");
+    const services    = extractSection("// SERVICES //",    "// MACROS //");
+    const macros      = extractSection("// MACROS //",       null);
+
+    return { imports, declaration, services, macros };
 }
 
-function merge_executables(executable1, executable2){
-    if (!executable2.trim()) throw new PreprocessError("Macros are not supported yet. Please remove any macro code.", "merge_executables")
+function merge_executables(executable1, executable2) {
+    if (executable2.trim()) throw new PreprocessError(
+        "Macros are not supported yet. Please remove any macro code.",
+        "merge_executables"
+    );
     return executable1;
 }
 
-function compile_imports(code, imports){
-    code.split("\n").forEach((line)=>{
-        const [definitionPart, outputPart] = line.split('=>').map(s => s.trim());
+// FIX: guard against empty section so "".split("\n") → [""] doesn't produce
+//      a garbage import entry.
+function compile_imports(code, imports) {
+    if (!code.trim()) return;
 
-        const [pathPart, inputPart] = definitionPart.split(':').map(s => s.trim());
+    code.split("\n").forEach((line) => {
+        if (!line.trim()) return; // skip blank lines
 
-        
-        const [module, name] = pathPart.split('.');
+        const [definitionPart, outputPart] = line.split("=>").map(s => s.trim());
+        const [pathPart, inputPart]        = definitionPart.split(":").map(s => s.trim());
+        const [module, name]               = pathPart.split(".");
 
-        
         const extractTypes = (typeString) => {
             if (!typeString) return [];
             const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
@@ -106,56 +107,111 @@ function compile_imports(code, imports){
         };
 
         imports.push({
-            module: module,
-            name: name,
-            input: extractTypes(inputPart),
+            module,
+            name,
+            input:  extractTypes(inputPart),
             output: extractTypes(outputPart)
         });
-    })
+    });
 }
 
-function compile_declaration(code, functions, exports, AmountOfImports){
-    let service_name = null
-    const lines = code.split("\n")
-    lines.forEach((line)=>{
-        if (line.startsWith("@")) service_name = line.substring(1).trim()
-        else {
-            if (!service_name) throw new PreprocessError("The declaration part must start with the opening of a new service via the @ syntax", "compile_declaration")
-            
-            if (line.startsWith("internal ") || line.startsWith("endpoint ")) clean_line = line.substring(9)
-            else throw new PreprocessError("Declartions must either be an endpoint or internal.", "compile_declaration")
-            
-            const [definitionPart, outputPart] = line.split('=>').map(s => s.trim());
+function compile_declaration(code, functions, exports, amountOfImports, executables) {
+    // FIX: guard against empty section
+    if (!code.trim()) return;
 
-            const [name, inputPart] = definitionPart.split(':').map(s => s.trim());
+    let service_name;
+    const lines = code.split("\n");
 
-            const extractTypes = (typeString) => {
-                if (!typeString) return [];
-                const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-                return matches.map(match => encodeWasmInstruction(match[1]));
-            };
+    lines.forEach((line) => {
+        if (!line.trim()) return; // skip blank lines
 
-            functions.push({
-                input: extractTypes(inputPart),
-                output: extractTypes(outputPart)
-            })
-            if (line.startsWith("endpoint ")){
-                exports.push({
-                    name: service_name.concat(".", name),
-                    index: AmountOfImports + (functions.length - 1)
-                });
-            }
-            
+        if (line.startsWith("@")) {
+            service_name = line.substring(1).trim();
+            return;
         }
-    })
-}
-function compile_executables(code, functions, executables){
-    lines = code.split("\n")
-    // goes throught all of the lines
-    // registers functions in order
-    // goes throught all of the lines again
-    // sets the locals
 
+        if (!service_name) throw new PreprocessError(
+            "The declaration part must start with the opening of a new service via the @ syntax",
+            "compile_declaration"
+        );
+
+        // FIX: strip the keyword prefix into clean_line, then parse from it.
+        //      Previously clean_line was assigned but never used — all parsing
+        //      still ran on `line`, leaving "endpoint " / "internal " in `name`.
+        let clean_line;
+        if      (line.startsWith("internal ")) clean_line = line.substring(9);
+        else if (line.startsWith("endpoint "))  clean_line = line.substring(9);
+        else throw new PreprocessError(
+            "Declarations must either be an endpoint or internal.",
+            "compile_declaration"
+        );
+
+        const [definitionPart, outputPart] = clean_line.split("=>").map(s => s.trim());
+        const [name, inputPart]            = definitionPart.split(":").map(s => s.trim());
+
+        const extractTypes = (typeString) => {
+            if (!typeString) return [];
+            const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
+            return matches.map(match => encodeWasmInstruction(match[1]));
+        };
+
+        const signature = {
+            input:  extractTypes(inputPart),
+            output: extractTypes(outputPart)
+        };
+
+        // Parallel arrays: executables[i] is the body stub for functions[i]
+        executables.push(service_name.concat(".", name)); // placeholder; replaced in compile_executables
+        functions.push(signature);
+
+        if (line.startsWith("endpoint ")) {
+            exports.push({
+                name:      service_name.concat(".", name),
+                index:     amountOfImports + (functions.length - 1),
+                // FIX: signature was missing here, causing meta[e.name] = undefined
+                signature
+            });
+        }
+    });
+}
+
+function compile_executables(code, functions, executables) {
+    // FIX: removed duplicate implicit-global `lines = code.split("\n")` that
+    //      caused a SyntaxError due to the subsequent `const lines` redeclaration.
+    if (!code.trim()) return;
+
+    let service_name;
+    let function_index;
+    const lines = code.split("\n");
+
+    lines.forEach((line) => {
+        if (!line.trim()) return; // skip blank lines
+
+        if (line.startsWith("@")) {
+            service_name = line.substring(1).trim();
+        } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
+            const match = line.substring(9).match(/([a-zA-Z_$][\w$]*)\s*:/);
+            if (!match) throw new PreprocessError(
+                "You must specify the name of the function",
+                "compile_executables"
+            );
+
+            const key = `${service_name}.${match[1]}`;
+            function_index = executables.indexOf(key);
+
+            // FIX: guard against -1 so we never write to executables[-1]
+            if (function_index === -1) throw new PreprocessError(
+                `Function "${key}" was not found in the declaration`,
+                "compile_executables"
+            );
+
+            // FIX: initialise as the shape formatBinary expects: { locals, binary }
+            //      Previously replaced with [] which has no .locals/.binary properties.
+            executables[function_index] = { locals: [], binary: [] };
+        } else {
+            // TODO: compile instruction line and push into executables[function_index]
+        }
+    });
 }
 
 
@@ -191,12 +247,8 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         return types.length - 1;
     };
 
-    const mappedImports = imports.map(imp => ({
-        ...imp,
-        typeIndex: getOrAddType(imp.input, imp.output)
-    }));
-    
-    const funcTypeIndices = functions.map(fn => getOrAddType(fn.input, fn.output));
+    const mappedImports    = imports.map(imp => ({ ...imp, typeIndex: getOrAddType(imp.input, imp.output) }));
+    const funcTypeIndices  = functions.map(fn  => getOrAddType(fn.input, fn.output));
 
     if (types.length) {
         binary.push(0x01);
@@ -212,7 +264,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         binary.push(0x02);
         const encImp = mappedImports.map((imp) => {
             const mod = [...imp.module].map((c) => c.charCodeAt(0));
-            const nm  = [...imp.name].map((c) => c.charCodeAt(0));
+            const nm  = [...imp.name].map((c)   => c.charCodeAt(0));
             return [mod.length, ...mod, nm.length, ...nm, 0x00, ...encodeULEB128(imp.typeIndex)];
         });
         let size = encodeULEB128(mappedImports.length).length;
@@ -253,9 +305,9 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
     if (exportEntries.length || memory?.open) {
         binary.push(0x07);
 
-        const memExportName = "memory";
+        const memExportName      = "memory";
         const memExportNameBytes = [...memExportName].map((c) => c.charCodeAt(0));
-        const totalExports = exportEntries.length + (memory?.open ? 1 : 0);
+        const totalExports       = exportEntries.length + (memory?.open ? 1 : 0);
 
         let size = encodeULEB128(totalExports).length;
         exportEntries.forEach(([name, idx]) => {
@@ -280,7 +332,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         binary.push(0x0a);
 
         const bodies = executables.map((fn, fnIdx) => {
-            const paramCount  = functions[fnIdx].input.length; 
+            const paramCount  = functions[fnIdx].input.length;
             const localValues = fn.locals.slice(paramCount).map(([_, valtype]) => valtype);
 
             const groups = [];
@@ -321,48 +373,46 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
 }
 
 function encodeULEB128(v) {
-  v = BigInt(v || 0);
-  const b = [];
-  do {
-    let byte = Number(v & 0x7fn);
-    v >>= 7n;
-    if (v !== 0n) byte |= 0x80;
-    b.push(byte);
-  } while (v !== 0n);
-  return b;
+    v = BigInt(v || 0);
+    const b = [];
+    do {
+        let byte = Number(v & 0x7fn);
+        v >>= 7n;
+        if (v !== 0n) byte |= 0x80;
+        b.push(byte);
+    } while (v !== 0n);
+    return b;
 }
 
 function encodeSLEB128(v) {
-  v = BigInt(v || 0);
-  const b = [];
-  let more = true;
-  while (more) {
-    let byte = Number(v & 0x7fn);
-    v >>= 7n;
-    if ((v === 0n && (byte & 0x40) === 0) || (v === -1n && (byte & 0x40) !== 0))
-      more = false;
-    else
-      byte |= 0x80;
-    b.push(byte);
-  }
-  return b;
+    v = BigInt(v || 0);
+    const b = [];
+    let more = true;
+    while (more) {
+        let byte = Number(v & 0x7fn);
+        v >>= 7n;
+        if ((v === 0n && (byte & 0x40) === 0) || (v === -1n && (byte & 0x40) !== 0))
+            more = false;
+        else
+            byte |= 0x80;
+        b.push(byte);
+    }
+    return b;
 }
 
 function encodeF32(v) {
-  const buf = new ArrayBuffer(4);
-  new DataView(buf).setFloat32(0, v, true);
-  return [...new Uint8Array(buf)];
+    const buf = new ArrayBuffer(4);
+    new DataView(buf).setFloat32(0, v, true);
+    return [...new Uint8Array(buf)];
 }
 
 function encodeF64(v) {
-  const buf = new ArrayBuffer(8);
-  new DataView(buf).setFloat64(0, v, true);
-  return [...new Uint8Array(buf)];
+    const buf = new ArrayBuffer(8);
+    new DataView(buf).setFloat64(0, v, true);
+    return [...new Uint8Array(buf)];
 }
 
-function encodeWasmInstruction(instruction){
+function encodeWasmInstruction(instruction) {
     const bt = { empty: 0x40, int32: 0x7f, int64: 0x7e, float32: 0x7d, float64: 0x7c };
-    if (instruction in bt){
-        return bt[instruction];
-    }
+    if (instruction in bt) return bt[instruction];
 }
