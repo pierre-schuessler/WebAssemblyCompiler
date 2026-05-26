@@ -88,13 +88,11 @@ function merge_executables(executable1, executable2) {
     return executable1;
 }
 
-// FIX: guard against empty section so "".split("\n") → [""] doesn't produce
-//      a garbage import entry.
 function compile_imports(code, imports) {
     if (!code.trim()) return;
 
     code.split("\n").forEach((line) => {
-        if (!line.trim()) return; // skip blank lines
+        if (!line.trim()) return;
 
         const [definitionPart, outputPart] = line.split("=>").map(s => s.trim());
         const [pathPart, inputPart]        = definitionPart.split(":").map(s => s.trim());
@@ -116,14 +114,13 @@ function compile_imports(code, imports) {
 }
 
 function compile_declaration(code, functions, exports, amountOfImports, executables) {
-    // FIX: guard against empty section
     if (!code.trim()) return;
 
     let service_name;
     const lines = code.split("\n");
 
     lines.forEach((line) => {
-        if (!line.trim()) return; // skip blank lines
+        if (!line.trim()) return;
 
         if (line.startsWith("@")) {
             service_name = line.substring(1).trim();
@@ -135,9 +132,6 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
             "compile_declaration"
         );
 
-        // FIX: strip the keyword prefix into clean_line, then parse from it.
-        //      Previously clean_line was assigned but never used — all parsing
-        //      still ran on `line`, leaving "endpoint " / "internal " in `name`.
         let clean_line;
         if      (line.startsWith("internal ")) clean_line = line.substring(9);
         else if (line.startsWith("endpoint "))  clean_line = line.substring(9);
@@ -160,15 +154,13 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
             output: extractTypes(outputPart)
         };
 
-        // Parallel arrays: executables[i] is the body stub for functions[i]
-        executables.push(service_name.concat(".", name)); // placeholder; replaced in compile_executables
+        executables.push(service_name.concat(".", name));
         functions.push(signature);
 
         if (line.startsWith("endpoint ")) {
             exports.push({
                 name:      service_name.concat(".", name),
                 index:     amountOfImports + (functions.length - 1),
-                // FIX: signature was missing here, causing meta[e.name] = undefined
                 signature
             });
         }
@@ -176,8 +168,6 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
 }
 
 function compile_executables(code, functions, executables) {
-    // FIX: removed duplicate implicit-global `lines = code.split("\n")` that
-    //      caused a SyntaxError due to the subsequent `const lines` redeclaration.
     if (!code.trim()) return;
 
     let service_name;
@@ -185,7 +175,7 @@ function compile_executables(code, functions, executables) {
     const lines = code.split("\n");
 
     lines.forEach((line) => {
-        if (!line.trim()) return; // skip blank lines
+        if (!line.trim()) return;
 
         if (line.startsWith("@")) {
             service_name = line.substring(1).trim();
@@ -199,14 +189,11 @@ function compile_executables(code, functions, executables) {
             const key = `${service_name}.${match[1]}`;
             function_index = executables.indexOf(key);
 
-            // FIX: guard against -1 so we never write to executables[-1]
             if (function_index === -1) throw new PreprocessError(
                 `Function "${key}" was not found in the declaration`,
                 "compile_executables"
             );
 
-            // FIX: initialise as the shape formatBinary expects: { locals, binary }
-            //      Previously replaced with [] which has no .locals/.binary properties.
             executables[function_index] = { locals: [], binary: [] };
         } else {
             // TODO: compile instruction line and push into executables[function_index]
