@@ -180,7 +180,7 @@ function compile_executables(code, functions, executables) {
         if (line.startsWith("@")) {
             service_name = line.substring(1).trim();
         } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
-            const match = line.substring(9).match(/([a-zA-Z_$][\w$]*)\s*:/);
+            const match = line.substring(9).match(/([a-zA-Z_$][\w$]*)\s*\(/);
             if (!match) throw new PreprocessError(
                 "You must specify the name of the function",
                 "compile_executables",
