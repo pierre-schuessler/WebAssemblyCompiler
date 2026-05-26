@@ -198,6 +198,23 @@ function compile_executables(code, functions, executables) {
             executables[function_index] = { locals: [], binary: [] };
         } else {
             // TODO: compile instruction line and push into executables[function_index]
+            const inst = line.trim();
+            const binary = executables[function_index].binary;
+
+            if (inst === "end") {
+                binary.push(0x0b); // Wasm function terminator
+            } else if (inst === "nop") {
+                binary.push(0x01); // Do nothing
+            } else if (inst.startsWith("i32.const")) {
+                const val = parseInt(inst.split(" ")[1], 10);
+                binary.push(0x41, ...encodeSLEB128(val)); // Push integer to stack
+            } else {
+                throw new PreprocessError(
+                    `Unknown instruction: ${inst}`, 
+                    "compile_executables", 
+                    line
+                );
+            }
         }
     });
 }
