@@ -22,7 +22,7 @@ export function compile(code, libs = {}) {
     let functions   = [],
     imports     = [], 
     exports     = [],
-    codes       = [],
+    executables = [],
     globals     = [],
     dataSegs    = [],
     memory      = null;
@@ -32,7 +32,7 @@ export function compile(code, libs = {}) {
 
     compile_imports(import_code, imports);
     compile_declaration(declaration_code, functions, exports, imports.length);
-    compile_executables(executable_code, functions, codes);
+    compile_executables(executable_code, functions, executables);
 
     const exportsForBinary = {};
     const meta = {};
@@ -42,7 +42,7 @@ export function compile(code, libs = {}) {
         meta[e.name] = e.signature;
     });
 
-    const result = formatBinary(functions, imports, exportsForBinary, codes, globals, dataSegs, memory);
+    const result = formatBinary(functions, imports, exportsForBinary, executables, globals, dataSegs, memory);
 
     result.meta = meta;
 
@@ -121,6 +121,7 @@ function compile_declaration(code, functions, exports, AmountOfImports){
         if (line.startsWith("@")) service_name = line.substring(1).trim()
         else {
             if (!service_name) throw new PreprocessError("The declaration part must start with the opening of a new service via the @ syntax", "compile_declaration")
+            
             const [definitionPart, outputPart] = line.split('=>').map(s => s.trim());
 
             const [name, inputPart] = definitionPart.split(':').map(s => s.trim());
@@ -142,7 +143,14 @@ function compile_declaration(code, functions, exports, AmountOfImports){
         }
     })
 }
-function compile_executables(executable_code, functions, codes){}
+function compile_executables(code, functions, executables){
+    lines = code.split("\n")
+    // goes throught all of the lines
+    // registers functions in order
+    // goes throught all of the lines again
+    // sets the locals
+
+}
 
 
 
@@ -155,7 +163,7 @@ imports: Array of functions to import from the host environment.
 exports: Object mapping export names to their absolute function indices.
          Example: { main: 0, "test": 2 }
          Note: The index is absolute. If you have 1 import, your first internal function is at index 1.
-codes: Array of function bodies matching the `functions` array.
+executables: Array of function bodies matching the `functions` array.
        Example: [ { locals: [["x", 127], ["y", 127]], binary: [0x20, 0x00, 0x0b] } ]
        Note: `locals` must include the function parameters first, followed by internal locals.
 globals: Array of global variable definitions.
@@ -165,7 +173,7 @@ dataSegs: Array of data segments to initialize memory.
 memory: Object defining memory requirements.
         Example: { min: 1, max: 2, open: true } (open defines if "memory" is exported)
 */
-function formatBinary(functions = [], imports = [], exports = {}, codes = [], globals = [], dataSegs = [], memory = null) {
+function formatBinary(functions = [], imports = [], exports = {}, executables = [], globals = [], dataSegs = [], memory = null) {
     const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
 
     const types = [];
@@ -262,10 +270,10 @@ function formatBinary(functions = [], imports = [], exports = {}, codes = [], gl
         }
     }
 
-    if (codes.length) {
+    if (executables.length) {
         binary.push(0x0a);
 
-        const bodies = codes.map((fn, fnIdx) => {
+        const bodies = executables.map((fn, fnIdx) => {
             const paramCount  = functions[fnIdx].input.length; 
             const localValues = fn.locals.slice(paramCount).map(([_, valtype]) => valtype);
 
@@ -283,9 +291,9 @@ function formatBinary(functions = [], imports = [], exports = {}, codes = [], gl
             return [...encodeULEB128(body.length), ...body];
         });
 
-        let size = encodeULEB128(codes.length).length;
+        let size = encodeULEB128(executables.length).length;
         bodies.forEach((b) => (size += b.length));
-        binary.push(...encodeULEB128(size), ...encodeULEB128(codes.length));
+        binary.push(...encodeULEB128(size), ...encodeULEB128(executables.length));
         bodies.forEach((b) => binary.push(...b));
     }
 
