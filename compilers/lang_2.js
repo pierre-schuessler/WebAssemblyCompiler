@@ -183,7 +183,8 @@ function compile_executables(code, functions, executables) {
             const match = line.substring(9).match(/([a-zA-Z_$][\w$]*)\s*:/);
             if (!match) throw new PreprocessError(
                 "You must specify the name of the function",
-                "compile_executables"
+                "compile_executables",
+                line
             );
 
             const key = `${service_name}.${match[1]}`;
