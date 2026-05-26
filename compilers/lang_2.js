@@ -52,7 +52,7 @@ export function compile(code, libs = {}) {
 function cleanup(input) {
     input = input
     .split("\n")
-    .map(l => l.replace(/\/\/.*$/, "").trim())
+    .map(l => l.replace(/#.*$/, "").trim())
     .filter(l => l.length > 0).join("\n");
     
     const code = input.replace(/\r\n/g, "\n").trim();
