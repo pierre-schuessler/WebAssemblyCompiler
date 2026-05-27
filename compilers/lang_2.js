@@ -208,19 +208,50 @@ function compile_executables(code, functions, executables) {
         if (line.startsWith("@")) {
             service_name = line.substring(1).trim();
         } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
-            const match = line.substring(9).match(/([a-zA-Z_$][\w$]*)\s*\(/);
-            if (!match) throw new CompilationError(
-                "You must specify the name of the function",
-                "compile_executables",
-                line
+            const clean_line = line.substring(9);
+
+            // Reuse the same parsing logic as compile_declaration
+            const [definitionPart, outputPart] = clean_line.split("=>").map(s => s.trim());
+            const [name, inputPart]            = definitionPart.split(":").map(s => s.trim());
+
+            if (!name) throw new CompilationError(
+                "You must specify the name of the function.",
+                "compile_executables", line
             );
 
-            const key = `${service_name}.${match[1]}`;
+            // Require both sides of the signature to be explicitly written
+            if (inputPart === undefined || outputPart === undefined) throw new CompilationError(
+                `Missing signature. Expected format: endpoint ${name}: (type)... => (type)...`,
+                "compile_executables", line
+            );
+
+            const extractTypes = (typeString) => {
+                if (!typeString) return [];
+                const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
+                return matches.map(match => encodeWasmInstruction(match[1]));
+            };
+
+            const bodyInput  = extractTypes(inputPart);
+            const bodyOutput = extractTypes(outputPart);
+
+            const key = `${service_name}.${name}`;
             function_index = executables.indexOf(key);
 
             if (function_index === -1) throw new CompilationError(
-                `Function "${key}" was not found in the declaration`,
+                `Function "${key}" was not found in the declaration.`,
                 "compile_executables"
+            );
+
+            // Validate the body signature matches the declaration
+            const declared = functions[function_index];
+            if (
+                JSON.stringify(bodyInput)  !== JSON.stringify(declared.input) ||
+                JSON.stringify(bodyOutput) !== JSON.stringify(declared.output)
+            ) throw new CompilationError(
+                `Signature mismatch for "${key}". ` +
+                `Body says (${bodyInput}) => (${bodyOutput}) ` +
+                `but declaration says (${declared.input}) => (${declared.output}).`,
+                "compile_executables", line
             );
 
             executables[function_index] = { locals: [], binary: [] };
