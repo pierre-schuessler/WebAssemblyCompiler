@@ -57,9 +57,28 @@ function cleanup(input) {
     
     const code = input.replace(/\r\n/g, "\n").trim();
 
+    // --- NEW VALIDATION BLOCK ---
+    const requiredSections = [
+        "// IMPORTS //",
+        "// DECLARATIONS //",
+        "// SERVICES //",
+        "// MACROS //"
+    ];
+
+    requiredSections.forEach(section => {
+        if (!code.includes(section)) {
+            throw new CompilationError(
+                `Missing or misspelled section header. Expected to find exactly: ${section}`,
+                "cleanup"
+            );
+        }
+    });
+    // ----------------------------
+
     function extractSection(startTag, endTag) {
         const startIndex = code.indexOf(startTag);
-        if (startIndex === -1) return "";
+        // (If the code gets here, we already know the startTag exists)
+        if (startIndex === -1) return ""; 
 
         const from = startIndex + startTag.length;
         let endIndex = code.length;
@@ -77,8 +96,8 @@ function cleanup(input) {
             .trim();
     }
 
-    const imports     = extractSection("// IMPORTS //",     "// DECLARATION //");
-    const declaration = extractSection("// DECLARATION //", "// SERVICES //");
+    const imports     = extractSection("// IMPORTS //",     "// DECLARATIONS //");
+    const declaration = extractSection("// DECLARATIONS //", "// SERVICES //");
     const services    = extractSection("// SERVICES //",    "// MACROS //");
     const macros      = extractSection("// MACROS //",       null);
 
