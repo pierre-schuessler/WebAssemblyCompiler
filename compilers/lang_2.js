@@ -27,8 +27,8 @@ export function compile(code, libs = {}) {
         dataSegs    = [],
         memory      = null;
 
-    let { imports: import_code, declaration: declaration_code, services: services_code, macros: macros_code } = cleanup(code);
-    let executable_code = merge_executables(services_code, macros_code);
+    let { imports: import_code, declaration: declaration_code, bodies: bodies_code, macros: macros_code } = cleanup(code);
+    let executable_code = merge_executables(bodies_code, macros_code);
 
     compile_imports(import_code, imports);
     compile_declaration(declaration_code, functions, exports, imports.length, executables);
@@ -57,11 +57,10 @@ function cleanup(input) {
     
     const code = input.replace(/\r\n/g, "\n").trim();
 
-    // --- NEW VALIDATION BLOCK ---
     const requiredSections = [
         "// IMPORTS //",
         "// DECLARATIONS //",
-        "// SERVICES //",
+        "// BODIES //",
         "// MACROS //"
     ];
 
@@ -73,11 +72,9 @@ function cleanup(input) {
             );
         }
     });
-    // ----------------------------
 
     function extractSection(startTag, endTag) {
         const startIndex = code.indexOf(startTag);
-        // (If the code gets here, we already know the startTag exists)
         if (startIndex === -1) return ""; 
 
         const from = startIndex + startTag.length;
@@ -96,12 +93,12 @@ function cleanup(input) {
             .trim();
     }
 
-    const imports     = extractSection("// IMPORTS //",     "// DECLARATIONS //");
-    const declaration = extractSection("// DECLARATIONS //", "// SERVICES //");
-    const services    = extractSection("// SERVICES //",    "// MACROS //");
-    const macros      = extractSection("// MACROS //",       null);
+    const imports     = extractSection("// IMPORTS //",      "// DECLARATIONS //");
+    const declaration = extractSection("// DECLARATIONS //", "// BODIES //");
+    const bodies      = extractSection("// BODIES //",       "// MACROS //");
+    const macros      = extractSection("// MACROS //",        null);
 
-    return { imports, declaration, services, macros };
+    return { imports, declaration, bodies, macros };
 }
 
 function merge_executables(executable1, executable2) {
@@ -201,26 +198,24 @@ function compile_executables(code, functions, executables) {
 
     lines.forEach((line) => {
         if (!line.trim()) return;
-        let isDepth0Line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ")
-        if (isDepth0Line && !(depth == 0)) throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line)
-        if (!isDepth0Line && depth == 0 && line != '{' && line != '}') throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line)
+        let is_depth0_line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ")
+        if (is_depth0_line && !(depth == 0)) throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line)
+        if (!is_depth0_line && depth == 0 && line != '{' && line != '}') throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line)
 
         if (line.startsWith("@")) {
             service_name = line.substring(1).trim();
         } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
             const clean_line = line.substring(9);
 
-            // Reuse the same parsing logic as compile_declaration
-            const [definitionPart, outputPart] = clean_line.split("=>").map(s => s.trim());
-            const [name, inputPart]            = definitionPart.split(":").map(s => s.trim());
+            const [definition_part, output_part] = clean_line.split("=>").map(s => s.trim());
+            const [name, input_part]             = definition_part.split(":").map(s => s.trim());
 
             if (!name) throw new CompilationError(
                 "You must specify the name of the function.",
                 "compile_executables", line
             );
 
-            // Require both sides of the signature to be explicitly written
-            if (inputPart === undefined || outputPart === undefined) throw new CompilationError(
+            if (input_part === undefined || output_part === undefined) throw new CompilationError(
                 `Missing signature. Expected format: endpoint ${name}: (type)... => (type)...`,
                 "compile_executables", line
             );
@@ -231,8 +226,8 @@ function compile_executables(code, functions, executables) {
                 return matches.map(match => encodeWasmInstruction(match[1]));
             };
 
-            const bodyInput  = extractTypes(inputPart);
-            const bodyOutput = extractTypes(outputPart);
+            const body_input  = extractTypes(input_part);
+            const body_output = extractTypes(output_part);
 
             const key = `${service_name}.${name}`;
             function_index = executables.indexOf(key);
@@ -242,43 +237,40 @@ function compile_executables(code, functions, executables) {
                 "compile_executables"
             );
 
-            // Validate the body signature matches the declaration
             const declared = functions[function_index];
             if (
-                JSON.stringify(bodyInput)  !== JSON.stringify(declared.input) ||
-                JSON.stringify(bodyOutput) !== JSON.stringify(declared.output)
+                JSON.stringify(body_input)  !== JSON.stringify(declared.input) ||
+                JSON.stringify(body_output) !== JSON.stringify(declared.output)
             ) throw new CompilationError(
                 `Signature mismatch for "${key}". ` +
-                `Body says (${bodyInput}) => (${bodyOutput}) ` +
+                `Body says (${body_input}) => (${body_output}) ` +
                 `but declaration says (${declared.input}) => (${declared.output}).`,
                 "compile_executables", line
             );
 
             executables[function_index] = { locals: [], binary: [] };
         } else {
-            // TODO: compile instruction line and push into executables[function_index]
             if (line == '{') depth++;
             else if (line == '}') depth--;
-            else{
+            else {
                 const inst = line.trim();
                 const binary = executables[function_index].binary;
 
                 if (inst === "end") {
-                    binary.push(0x0b); // Wasm function terminator
+                    binary.push(0x0b);
                 } else if (inst === "nop") {
-                    binary.push(0x01); // Do nothing
+                    binary.push(0x01);
                 } else if (inst.startsWith("i32.const")) {
                     const val = parseInt(inst.split(" ")[1], 10);
-                    binary.push(0x41, ...encodeSLEB128(val)); // Push integer to stack
+                    binary.push(0x41, ...encodeSLEB128(val));
                 } else {
                     throw new CompilationError(
-                        `Unknown instruction: ${inst}`, 
-                        "compile_executables", 
+                        `Unknown instruction: ${inst}`,
+                        "compile_executables",
                         line
                     );
                 }
             }
-            
         }
     });
 }
@@ -316,8 +308,8 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         return types.length - 1;
     };
 
-    const mappedImports    = imports.map(imp => ({ ...imp, typeIndex: getOrAddType(imp.input, imp.output) }));
-    const funcTypeIndices  = functions.map(fn  => getOrAddType(fn.input, fn.output));
+    const mapped_imports    = imports.map(imp => ({ ...imp, typeIndex: getOrAddType(imp.input, imp.output) }));
+    const func_type_indices = functions.map(fn  => getOrAddType(fn.input, fn.output));
 
     if (types.length) {
         binary.push(0x01);
@@ -329,35 +321,35 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         });
     }
 
-    if (mappedImports.length) {
+    if (mapped_imports.length) {
         binary.push(0x02);
-        const encImp = mappedImports.map((imp) => {
+        const enc_imp = mapped_imports.map((imp) => {
             const mod = [...imp.module].map((c) => c.charCodeAt(0));
             const nm  = [...imp.name].map((c)   => c.charCodeAt(0));
             return [mod.length, ...mod, nm.length, ...nm, 0x00, ...encodeULEB128(imp.typeIndex)];
         });
-        let size = encodeULEB128(mappedImports.length).length;
-        encImp.forEach((e) => (size += e.length));
-        binary.push(...encodeULEB128(size), ...encodeULEB128(mappedImports.length));
-        encImp.forEach((e) => binary.push(...e));
+        let size = encodeULEB128(mapped_imports.length).length;
+        enc_imp.forEach((e) => (size += e.length));
+        binary.push(...encodeULEB128(size), ...encodeULEB128(mapped_imports.length));
+        enc_imp.forEach((e) => binary.push(...e));
     }
 
-    if (funcTypeIndices.length) {
+    if (func_type_indices.length) {
         binary.push(0x03);
-        let size = encodeULEB128(funcTypeIndices.length).length;
-        funcTypeIndices.forEach((typeIdx) => { size += encodeULEB128(typeIdx).length; });
-        binary.push(...encodeULEB128(size), ...encodeULEB128(funcTypeIndices.length));
-        funcTypeIndices.forEach((typeIdx) => binary.push(...encodeULEB128(typeIdx)));
+        let size = encodeULEB128(func_type_indices.length).length;
+        func_type_indices.forEach((type_idx) => { size += encodeULEB128(type_idx).length; });
+        binary.push(...encodeULEB128(size), ...encodeULEB128(func_type_indices.length));
+        func_type_indices.forEach((type_idx) => binary.push(...encodeULEB128(type_idx)));
     }
 
     if (memory) {
-        const hasMax = memory.max != null;
-        const minEnc = encodeULEB128(memory.min);
-        const maxEnc = hasMax ? encodeULEB128(memory.max) : [];
-        const size   = 1 + 1 + minEnc.length + maxEnc.length;
+        const has_max = memory.max != null;
+        const min_enc = encodeULEB128(memory.min);
+        const max_enc = has_max ? encodeULEB128(memory.max) : [];
+        const size    = 1 + 1 + min_enc.length + max_enc.length;
         binary.push(0x05, ...encodeULEB128(size));
-        binary.push(0x01, hasMax ? 0x01 : 0x00, ...minEnc);
-        if (hasMax) binary.push(...maxEnc);
+        binary.push(0x01, has_max ? 0x01 : 0x00, ...min_enc);
+        if (has_max) binary.push(...max_enc);
     }
 
     if (globals.length) {
@@ -370,29 +362,29 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         });
     }
 
-    const exportEntries = Object.entries(exports);
-    if (exportEntries.length || memory?.open) {
+    const export_entries = Object.entries(exports);
+    if (export_entries.length || memory?.open) {
         binary.push(0x07);
 
-        const memExportName      = "memory";
-        const memExportNameBytes = [...memExportName].map((c) => c.charCodeAt(0));
-        const totalExports       = exportEntries.length + (memory?.open ? 1 : 0);
+        const mem_export_name       = "memory";
+        const mem_export_name_bytes = [...mem_export_name].map((c) => c.charCodeAt(0));
+        const total_exports         = export_entries.length + (memory?.open ? 1 : 0);
 
-        let size = encodeULEB128(totalExports).length;
-        exportEntries.forEach(([name, idx]) => {
+        let size = encodeULEB128(total_exports).length;
+        export_entries.forEach(([name, idx]) => {
             size += 1 + name.length + 1 + encodeULEB128(idx).length;
         });
         if (memory?.open) {
-            size += 1 + memExportName.length + 1 + 1;
+            size += 1 + mem_export_name.length + 1 + 1;
         }
 
-        binary.push(...encodeULEB128(size), ...encodeULEB128(totalExports));
-        exportEntries.forEach(([name, idx]) => {
+        binary.push(...encodeULEB128(size), ...encodeULEB128(total_exports));
+        export_entries.forEach(([name, idx]) => {
             binary.push(name.length, ...[...name].map((c) => c.charCodeAt(0)));
             binary.push(0x00, ...encodeULEB128(idx));
         });
         if (memory?.open) {
-            binary.push(memExportName.length, ...memExportNameBytes);
+            binary.push(mem_export_name.length, ...mem_export_name_bytes);
             binary.push(0x02, 0x00);
         }
     }
@@ -400,22 +392,22 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
     if (executables.length) {
         binary.push(0x0a);
 
-        const bodies = executables.map((fn, fnIdx) => {
-            const paramCount  = functions[fnIdx].input.length;
+        const bodies = executables.map((fn, fn_idx) => {
+            const param_count  = functions[fn_idx].input.length;
             if (typeof fn === 'string' || fn instanceof String) throw new CompilationError(`Could not find an executable for ${fn}`, "formatBinary")
-            const localValues = fn.locals.slice(paramCount).map(([_, valtype]) => valtype);
+            const local_values = fn.locals.slice(param_count).map(([_, valtype]) => valtype);
 
             const groups = [];
             let i = 0;
-            while (i < localValues.length) {
+            while (i < local_values.length) {
                 let j = i;
-                while (j < localValues.length && localValues[j] === localValues[i]) j++;
-                groups.push([j - i, localValues[i]]);
+                while (j < local_values.length && local_values[j] === local_values[i]) j++;
+                groups.push([j - i, local_values[i]]);
                 i = j;
             }
-            const localDecls = groups.flatMap(([count, valtype]) => [...encodeULEB128(count), valtype]);
-            const groupCount = encodeULEB128(groups.length);
-            const body = [...groupCount, ...localDecls, ...fn.binary];
+            const local_decls = groups.flatMap(([count, valtype]) => [...encodeULEB128(count), valtype]);
+            const group_count = encodeULEB128(groups.length);
+            const body = [...group_count, ...local_decls, ...fn.binary];
             return [...encodeULEB128(body.length), ...body];
         });
 
