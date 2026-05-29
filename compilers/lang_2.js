@@ -248,7 +248,7 @@ function compile_executables(code, functions, executables) {
                 "compile_executables", line
             );
 
-            executables[function_index] = { locals: [], binary: [] };
+            executables[function_index] = { locals: {}, binary: [] };
         } else {
             if (line == '{') depth++;
             else if (line == '}') depth--;
@@ -287,8 +287,8 @@ exports: Object mapping export names to their absolute function indices.
          Example: { main: 0, "test": 2 }
          Note: The index is absolute. If you have 1 import, your first internal function is at index 1.
 executables: Array of function bodies matching the `functions` array.
-       Example: [ { locals: [["x", 127], ["y", 127]], binary: [0x20, 0x00, 0x0b] } ]
-       Note: `locals` must include the function parameters first, followed by internal locals.
+       Example: [ { locals: { x: 127, y: 127 }, binary: [0x20, 0x00, 0x0b] } ]
+       Note: `locals` contains only internal local variables (not function parameters).
 globals: Array of global variable definitions.
          Example: [ { gtype: 127, mutable: true, initExpr: [0x41, 0x00, 0x0b] } ]
 dataSegs: Array of data segments to initialize memory.
@@ -393,9 +393,8 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         binary.push(0x0a);
 
         const bodies = executables.map((fn, fn_idx) => {
-            const param_count  = functions[fn_idx].input.length;
             if (typeof fn === 'string' || fn instanceof String) throw new CompilationError(`Could not find an executable for ${fn}`, "formatBinary")
-            const local_values = fn.locals.slice(param_count).map(([_, valtype]) => valtype);
+            const local_values = Object.values(fn.locals);
 
             const groups = [];
             let i = 0;
