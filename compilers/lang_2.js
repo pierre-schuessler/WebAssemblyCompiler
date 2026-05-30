@@ -339,7 +339,7 @@ function compile_executables(code, functions, executables) {
                                     const localIndex = locals.findIndex(l => l.name === variableName);
                                     if (localIndex !== -1) {
                                         binary.push(0x20, localIndex);
-                                        stack.push(locals[localIndex].type)
+                                        stacktypes.push(locals[localIndex].type)
                                     } else {
                                         throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
                                     }
