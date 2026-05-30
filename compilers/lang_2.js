@@ -333,12 +333,14 @@ function compile_executables(code, functions, executables) {
                                 });
                             } else {
                                 // Input part: local.get (0x20)
-                                const localIndex = locals.findIndex(l => l.name === element);
-                                if (localIndex !== -1) {
-                                    binary.push(0x20, localIndex);
-                                } else {
-                                    throw new CompilationError(`Local variable ${element} not found.`, "compile_executables", line);
-                                }
+                                (element.split(",").map((v) => v.trim())).forEach((variableName) => {
+                                    const localIndex = locals.findIndex(l => l.name === variableName);
+                                    if (localIndex !== -1) {
+                                        binary.push(0x20, localIndex);
+                                    } else {
+                                        throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
+                                    }
+                                });
                             }
                         }
                     }
