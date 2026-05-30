@@ -191,33 +191,34 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
 function compile_executables(code, functions, executables) {
     if (!code.trim()) return;
 
-    let service_name;
-    let function_index;
+    let serviceName;
+    let functionIndex;
     let depth = 0;
     const lines = code.split("\n");
-    let function_order = [...executables];
-    let full_function_name;
+    let functionOrder = [...executables];
+    let localsOrder = [];
+    let fullFunctionName;
 
     lines.forEach((line) => {
         if (!line.trim()) return;
-        let is_depth0_line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ")
-        if (is_depth0_line && !(depth == 0)) throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line)
-        if (!is_depth0_line && depth == 0 && line != '{' && line != '}') throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line)
+        let isDepth0Line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ")
+        if (isDepth0Line && !(depth == 0)) throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line)
+        if (!isDepth0Line && depth == 0 && line != '{' && line != '}') throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line)
 
         if (line.startsWith("@")) {
-            service_name = line.substring(1).trim();
+            serviceName = line.substring(1).trim();
         } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
-            const clean_line = line.substring(9);
+            const cleanLine = line.substring(9);
 
-            const [definition_part, output_part] = clean_line.split("=>").map(s => s.trim());
-            const [name, input_part]             = definition_part.split(":").map(s => s.trim());
+            const [definitionPart, outputPart] = cleanLine.split("=>").map(s => s.trim());
+            const [name, inputPart]             = definitionPart.split(":").map(s => s.trim());
 
             if (!name) throw new CompilationError(
                 "You must specify the name of the function.",
                 "compile_executables", line
             );
 
-            if (input_part === undefined || output_part === undefined) throw new CompilationError(
+            if (inputPart === undefined || outputPart === undefined) throw new CompilationError(
                 `Missing signature. Expected format: endpoint ${name}: (type)... => (type)...`,
                 "compile_executables", line
             );
@@ -228,36 +229,43 @@ function compile_executables(code, functions, executables) {
                 return matches.map(match => encodeWasmInstruction(match[1]));
             };
 
-            const body_input  = extractTypes(input_part);
-            const body_output = extractTypes(output_part);
+            const bodyInput  = extractTypes(inputPart);
+            const bodyOutput = extractTypes(outputPart);
 
-            const key = `${service_name}.${name}`;
-            function_index = executables.indexOf(key);
-            full_function_name = key;
+            const key = `${serviceName}.${name}`;
+            functionIndex = executables.indexOf(key);
+            fullFunctionName = key;
 
-            if (function_index === -1) throw new CompilationError(
+            if (functionIndex === -1) throw new CompilationError(
                 `Function "${key}" was not found in the declaration.`,
                 "compile_executables"
             );
 
-            const declared = functions[function_index];
+            const declared = functions[functionIndex];
             if (
-                JSON.stringify(body_input)  !== JSON.stringify(declared.input) ||
-                JSON.stringify(body_output) !== JSON.stringify(declared.output)
+                JSON.stringify(bodyInput)  !== JSON.stringify(declared.input) ||
+                JSON.stringify(bodyOutput) !== JSON.stringify(declared.output)
             ) throw new CompilationError(
                 `Signature mismatch for "${key}". ` +
-                `Body says (${body_input}) => (${body_output}) ` +
+                `Body says (${bodyInput}) => (${bodyOutput}) ` +
                 `but declaration says (${declared.input}) => (${declared.output}).`,
                 "compile_executables", line
             );
 
-            executables[function_index] = { locals: {}, binary: [] };
+            const initialLocals = bodyInput.map((type, index) => {
+                return { 
+                    name: `arg${index}`,
+                    type: type 
+                };
+            });
+
+            executables[functionIndex] = { locals: initialLocals, binary: [] };
         } else {
             if (line == '{') depth++;
             else if (line == '}') depth--;
             else {
                 const inst = line.trim();
-                const binary = executables[function_index].binary;
+                const binary = executables[functionIndex].binary;
                 // create v1 (int32)
                 // create v2 (int32)
                 // "5" => v1
@@ -269,9 +277,9 @@ function compile_executables(code, functions, executables) {
                     const nameEndIndex = nameEndMatch ? nameEndMatch.index : remainder.length;
                     const name = remainder.slice(0, nameEndIndex);
 
-                    if (executables[function_index].locals[name]) {
+                    if (executables[functionIndex].locals.some(l => l.name === name)) {
                         throw new CompilationError(
-                            `Local variable ${name} was already defined in function ${full_function_name}`,
+                            `Local variable ${name} was already defined in function ${fullFunctionName}`,
                             "compile_executables",
                             line
                         );
@@ -291,26 +299,50 @@ function compile_executables(code, functions, executables) {
                     const rawType = line.slice(typeStart + 1, typeEnd).trim();
                     let type = encodeWasmInstruction(rawType);
 
-                    executables[function_index].locals[name] = type;
-                } else if (inst === "end") {
-                    binary.push(0x0b);
-                } else if (inst === "nop") {
-                    binary.push(0x01);
-                } else if (inst.startsWith("i32.const")) {
-                    const val = parseInt(inst.split(" ")[1], 10);
-                    binary.push(0x41, ...encodeSLEB128(val));
+                    executables[functionIndex].locals.push({ name, type });
                 } else {
-                    throw new CompilationError(
-                        `Unknown instruction: ${inst}`,
-                        "compile_executables",
-                        line
-                    );
+                    let computationalElements = line.split("=>").map((element)=>{return element.trim()})
+                    for (let i = 0; i < computationalElements.length; i++){
+                        let element = computationalElements[i];
+                        if (element.includes(".")) {
+                            // CALL instruction (0x10)
+                            const targetFunctionIndex = executables.indexOf(element);
+                            if (targetFunctionIndex !== -1) {
+                                binary.push(0x10, targetFunctionIndex); 
+                            } else {
+                                throw new CompilationError(`Function ${element} not found.`, "compile_executables", line);
+                            }
+                        } else {
+                            const locals = executables[functionIndex].locals;
+                            
+                            if (i == computationalElements.length - 1) {
+                                // Output part: local.set (0x21)
+                                (element.split(",").map((v) => v.trim())).forEach((variableName) => {
+                                    const localIndex = locals.findIndex(l => l.name === variableName);
+                                    if (localIndex !== -1) {
+                                        binary.push(0x21, localIndex);
+                                    } else {
+                                        throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
+                                    }
+                                });
+                            } else {
+                                // Input part: local.get (0x20)
+                                const localIndex = locals.findIndex(l => l.name === element);
+                                if (localIndex !== -1) {
+                                    binary.push(0x20, localIndex);
+                                } else {
+                                    throw new CompilationError(`Local variable ${element} not found.`, "compile_executables", line);
+                                }
+                            }
+                        }
+                    }
                 }
+                
+                
             }
         }
     });
 }
-
 
 
 /*
@@ -323,7 +355,7 @@ exports: Object mapping export names to their absolute function indices.
          Example: { main: 0, "test": 2 }
          Note: The index is absolute. If you have 1 import, your first internal function is at index 1.
 executables: Array of function bodies matching the `functions` array.
-       Example: [ { locals: { x: 127, y: 127 }, binary: [0x20, 0x00, 0x0b] } ]
+       Example: [ { locals: Map { "x" => 127, "y" => 127 }, binary: [0x20, 0x00, 0x0b] } ]
        Note: `locals` contains only internal local variables (not function parameters).
 globals: Array of global variable definitions.
          Example: [ { gtype: 127, mutable: true, initExpr: [0x41, 0x00, 0x0b] } ]
@@ -430,7 +462,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
 
         const bodies = executables.map((fn, fn_idx) => {
             if (typeof fn === 'string' || fn instanceof String) throw new CompilationError(`Could not find an executable for ${fn}`, "formatBinary")
-            const local_values = Object.values(fn.locals);
+            const local_values = fn.locals.map(l => l.type);
 
             const groups = [];
             let i = 0;
