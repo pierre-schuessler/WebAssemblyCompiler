@@ -292,11 +292,7 @@ function compile_executables(code, functions, executables) {
                     let type = encodeWasmInstruction(rawType);
 
                     executables[function_index].locals[name] = type;
-                }
-
-
-
-                if (inst === "end") {
+                } else if (inst === "end") {
                     binary.push(0x0b);
                 } else if (inst === "nop") {
                     binary.push(0x01);
