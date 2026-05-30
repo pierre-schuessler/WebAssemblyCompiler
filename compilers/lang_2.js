@@ -330,6 +330,8 @@ function compile_executables(code, functions, executables) {
                                     if (localIndex !== -1) {
                                         binary.push(0x21, localIndex);
                                     } else {
+                                        let instruction = encodeWasmInstruction(variableName, stacktypes);
+                                        if (instruction) binary.push(...instruction)
                                         throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
                                     }
                                 });
@@ -570,14 +572,14 @@ function encodeWasmInstruction(inst, stack = []) {
     };
 
     const operation = ops[inst];
-    if (!operation) throw new Error(`Unknown instruction: ${inst}`);
+    return null;
 
     const { arity, opcodes, opcode } = operation;
 
     if (arity === 0) return opcode;
 
     if (stack.length < arity) {
-        throw new Error(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
+        throw new CompilationError(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
     }
 
     const operands = stack.slice(-arity);
@@ -586,11 +588,11 @@ function encodeWasmInstruction(inst, stack = []) {
     const allMatch = operands.every(op => op === targetType);
     if (!allMatch) {
         const typesStr = operands.map(op => `0x${op.toString(16)}`).join(', ');
-        throw new Error(`Type mismatch for '${inst}': all ${arity} operands must match. Got [${typesStr}]`);
+        throw new CompilationError(`Type mismatch for '${inst}': all ${arity} operands must match. Got [${typesStr}]`);
     }
 
     const finalOpcode = opcodes[targetType];
-    if (!finalOpcode) throw new Error(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
+    if (!finalOpcode) throw new CompilationError(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
 
     return finalOpcode;
 }
