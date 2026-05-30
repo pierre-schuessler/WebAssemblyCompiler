@@ -51,10 +51,11 @@ export function compile(code, libs = {}) {
 
 function cleanup(input) {
     input = input
-    .split("\n")
-    .map(l => l.replace(/#.*$/, "").trim())
-    .filter(l => l.length > 0).join("\n");
-    
+        .split("\n")
+        .map(l => l.replace(/#.*$/, "").trim())
+        .filter(l => l.length > 0)
+        .join("\n");
+
     const code = input.replace(/\r\n/g, "\n").trim();
 
     const requiredSections = [
@@ -75,7 +76,7 @@ function cleanup(input) {
 
     function extractSection(startTag, endTag) {
         const startIndex = code.indexOf(startTag);
-        if (startIndex === -1) return ""; 
+        if (startIndex === -1) return "";
 
         const from = startIndex + startTag.length;
         let endIndex = code.length;
@@ -96,7 +97,7 @@ function cleanup(input) {
     const imports     = extractSection("// IMPORTS //",      "// DECLARATIONS //");
     const declaration = extractSection("// DECLARATIONS //", "// BODIES //");
     const bodies      = extractSection("// BODIES //",       "// MACROS //");
-    const macros      = extractSection("// MACROS //",        null);
+    const macros      = extractSection("// MACROS //",       null);
 
     return { imports, declaration, bodies, macros };
 }
@@ -122,7 +123,7 @@ function compile_imports(code, imports) {
         const extractTypes = (typeString) => {
             if (!typeString) return [];
             const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-            return matches.map(match => encodeWasmInstruction(match[1])[0]); // FIX 1
+            return matches.map(match => encodeWasmInstruction(match[1])[0]);
         };
 
         imports.push({
@@ -167,7 +168,7 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
         const extractTypes = (typeString) => {
             if (!typeString) return [];
             const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-            return matches.map(match => encodeWasmInstruction(match[1])[0]); // FIX 1
+            return matches.map(match => encodeWasmInstruction(match[1])[0]);
         };
 
         const signature = {
@@ -195,20 +196,25 @@ function compile_executables(code, functions, executables) {
     let functionIndex;
     let depth = 0;
     const lines = code.split("\n");
-    let functionOrder = [...executables];
-    let localsOrder = [];
     let fullFunctionName;
     let stacktypes = [];
 
+    
+    const OPCODE_END       = encodeWasmInstruction("end")[0];
+    const OPCODE_CALL      = encodeWasmInstruction("call")[0];
+    const OPCODE_LOCAL_GET = encodeWasmInstruction("local.get")[0];
+    const OPCODE_LOCAL_SET = encodeWasmInstruction("local.set")[0];
+
     lines.forEach((line) => {
         if (!line.trim()) return;
-        let isDepth0Line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ")
-        if (isDepth0Line && !(depth == 0)) throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line)
-        if (!isDepth0Line && depth == 0 && line != '{' && line != '}') throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line)
-    
+
+        const isDepth0Line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ");
+        if (isDepth0Line && depth !== 0) throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line);
+        if (!isDepth0Line && depth === 0 && line !== '{' && line !== '}') throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line);
 
         if (line.startsWith("@")) {
             serviceName = line.substring(1).trim();
+
         } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
             const cleanLine = line.substring(9);
 
@@ -228,7 +234,7 @@ function compile_executables(code, functions, executables) {
             const extractTypes = (typeString) => {
                 if (!typeString) return [];
                 const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-                return matches.map(match => encodeWasmInstruction(match[1])[0]); // FIX 1
+                return matches.map(match => encodeWasmInstruction(match[1])[0]);
             };
 
             const bodyInput  = extractTypes(inputPart);
@@ -254,107 +260,130 @@ function compile_executables(code, functions, executables) {
                 "compile_executables", line
             );
 
-            const initialLocals = bodyInput.map((type, index) => {
-                return { 
-                    name: `arg${index}`,
-                    type: type 
-                };
-            });
+            const initialLocals = bodyInput.map((type, index) => ({ name: `arg${index}`, type }));
 
-            stacktypes = []; // FIX 3: reset per function
+            stacktypes = [];
             executables[functionIndex] = { locals: initialLocals, binary: [] };
+
         } else {
-            if (line == '{') depth++;
-            else if (line == '}') {
+            if (line === '{') {
+                depth++;
+            } else if (line === '}') {
                 depth--;
-                if (depth == 0) {
-                    executables[functionIndex].binary.push(0x0b)
+                if (depth === 0) {
+                    executables[functionIndex].binary.push(OPCODE_END);
                 }
-            }
-            else {
-                const inst = line.trim();
+            } else {
                 const binary = executables[functionIndex].binary;
-                // create v1 (int32)
-                // create v2 (int32)
-                // "5" => v1
-                // "4" => v2
-                // v1, v2 => v2, module.funtion1 => v2
-                if (line.startsWith("create ")){
-                    const remainder = line.slice(7).trimStart(); 
+
+                if (line.startsWith("create ")) {
+                    const remainder    = line.slice(7).trimStart();
                     const nameEndMatch = remainder.match(/[\s(]/);
                     const nameEndIndex = nameEndMatch ? nameEndMatch.index : remainder.length;
-                    const name = remainder.slice(0, nameEndIndex);
+                    const name         = remainder.slice(0, nameEndIndex);
 
                     if (executables[functionIndex].locals.some(l => l.name === name)) {
                         throw new CompilationError(
-                            `Local variable ${name} was already defined in function ${fullFunctionName}`,
-                            "compile_executables",
-                            line
+                            `Local variable '${name}' was already defined in function '${fullFunctionName}'`,
+                            "compile_executables", line
                         );
                     }
 
                     const typeStart = line.indexOf("(");
-                    const typeEnd = line.indexOf(")", typeStart);
+                    const typeEnd   = line.indexOf(")", typeStart);
 
                     if (typeStart === -1 || typeEnd === -1) {
                         throw new CompilationError(
-                            `Missing parentheses for type declaration`, 
-                            "compile_executables", 
-                            line
+                            "Missing parentheses for type declaration",
+                            "compile_executables", line
                         );
                     }
 
                     const rawType = line.slice(typeStart + 1, typeEnd).trim();
-                    let type = encodeWasmInstruction(rawType)[0]; // FIX 2
+                    const type    = encodeWasmInstruction(rawType)[0];
 
                     executables[functionIndex].locals.push({ name, type });
+
                 } else {
-                    let computationalElements = line.split("=>").map((element)=>{return element.trim()})
-                    for (let i = 0; i < computationalElements.length; i++){
-                        let element = computationalElements[i];
-                        if (element.includes(".")) {
-                            // CALL instruction (0x10)
+                    const computationalElements = line.split("=>").map(el => el.trim());
+
+                    for (let i = 0; i < computationalElements.length; i++) {
+                        const element = computationalElements[i];
+                        const locals  = executables[functionIndex].locals;
+
+                        const isConstantElement = /^\((\w+)\)/.test(element);
+
+                        if (!isConstantElement && element.includes(".")) {
+                            // CALL instruction
                             const targetFunctionIndex = executables.indexOf(element);
                             if (targetFunctionIndex !== -1) {
-                                binary.push(0x10, targetFunctionIndex); 
+                                binary.push(OPCODE_CALL, targetFunctionIndex);
                             } else {
-                                binary.push(...encodeWasmInstruction(element, stacktypes))
-                                throw new CompilationError(`Function ${element} not found.`, "compile_executables", line);
+                                const instruction = encodeWasmInstruction(element, stacktypes);
+                                if (instruction) binary.push(...instruction);
+                                throw new CompilationError(`Function '${element}' not found.`, "compile_executables", line);
                             }
+
+                        } else if (i === computationalElements.length - 1) {
+                            element.split(",").map(v => v.trim()).forEach((variableName) => {
+                                const localIndex = locals.findIndex(l => l.name === variableName);
+                                if (localIndex !== -1) {
+                                    binary.push(OPCODE_LOCAL_SET, localIndex);
+                                } else {
+                                    const instruction = encodeWasmInstruction(variableName, stacktypes);
+                                    if (instruction) binary.push(...instruction);
+                                    else throw new CompilationError(`Local variable '${variableName}' not found.`, "compile_executables", line);
+                                }
+                            });
+
                         } else {
-                            const locals = executables[functionIndex].locals;
-                            
-                            if (i == computationalElements.length - 1) {
-                                // Output part: local.set (0x21)
-                                (element.split(",").map((v) => v.trim())).forEach((variableName) => {
-                                    const localIndex = locals.findIndex(l => l.name === variableName);
-                                    if (localIndex !== -1) {
-                                        binary.push(0x21, localIndex);
+                            element.split(",").map(v => v.trim()).forEach((variableName) => {
+                                const localIndex = locals.findIndex(l => l.name === variableName);
+
+                                if (localIndex !== -1) {
+                                    
+                                    binary.push(OPCODE_LOCAL_GET, localIndex);
+                                    stacktypes.push(locals[localIndex].type);
+
+                                } else {
+                                    
+                                    const constMatch = /^\((\w+)\)(.+)$/.exec(variableName);
+                                    if (constMatch) {
+                                        const typeName = constMatch[1];
+                                        const valueStr = constMatch[2].trim();
+                                        const typeCode = encodeWasmInstruction(typeName)?.[0];
+
+                                        if (typeCode === undefined)
+                                            throw new CompilationError(`Unknown type '${typeName}' in constant`, "compile_executables", line);
+
+                                        const constOpcode = encodeWasmInstruction("const", [], typeName);
+                                        if (!constOpcode)
+                                            throw new CompilationError(`Type '${typeName}' does not support const`, "compile_executables", line);
+
+                                        binary.push(...constOpcode);
+
+                                        const INT32  = encodeWasmInstruction("int32")[0];
+                                        const INT64  = encodeWasmInstruction("int64")[0];
+                                        const FLOAT32 = encodeWasmInstruction("float32")[0];
+                                        const FLOAT64 = encodeWasmInstruction("float64")[0];
+
+                                        if      (typeCode === INT32)   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
+                                        else if (typeCode === INT64)   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
+                                        else if (typeCode === FLOAT32) binary.push(...encodeF32(parseFloat(valueStr)));
+                                        else if (typeCode === FLOAT64) binary.push(...encodeF64(parseFloat(valueStr)));
+
+                                        stacktypes.push(typeCode);
+
                                     } else {
-                                        let instruction = encodeWasmInstruction(variableName, stacktypes);
-                                        if (instruction) binary.push(...instruction)
-                                        else throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
+                                        const instruction = encodeWasmInstruction(variableName, stacktypes);
+                                        if (instruction) binary.push(...instruction);
+                                        else throw new CompilationError(`Local variable '${variableName}' not found.`, "compile_executables", line);
                                     }
-                                });
-                            } else {
-                                // Input part: local.get (0x20)
-                                (element.split(",").map((v) => v.trim())).forEach((variableName) => {
-                                    const localIndex = locals.findIndex(l => l.name === variableName);
-                                    if (localIndex !== -1) {
-                                        binary.push(0x20, localIndex);
-                                        stacktypes.push(locals[localIndex].type)
-                                    } else {
-                                        let instruction = encodeWasmInstruction(variableName, stacktypes);
-                                        if (instruction) binary.push(...instruction)
-                                        else throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
-                                    }
-                                });
-                            }
+                                }
+                            });
                         }
                     }
                 }
-                
-                
             }
         }
     });
@@ -363,22 +392,21 @@ function compile_executables(code, functions, executables) {
 
 /*
 FormatBinary arguments
-functions: Array of function signatures defined in this module.
-           Example: [ { input: [127, 127], output: [127] } ] (where 127 is i32)
-imports: Array of functions to import from the host environment.
-         Example: [ { module: "env", name: "log", input: [127], output: [] } ]
-exports: Object mapping export names to their absolute function indices.
-         Example: { main: 0, "test": 2 }
-         Note: The index is absolute. If you have 1 import, your first internal function is at index 1.
+functions:   Array of function signatures defined in this module.
+             Example: [ { input: [127, 127], output: [127] } ]  (127 = i32)
+imports:     Array of functions to import from the host environment.
+             Example: [ { module: "env", name: "log", input: [127], output: [] } ]
+exports:     Object mapping export names to their absolute function indices.
+             Example: { main: 0, "test": 2 }
+             Note: index is absolute — if you have 1 import, your first internal fn is index 1.
 executables: Array of function bodies matching the `functions` array.
-       Example: [ { locals: Map { "x" => 127, "y" => 127 }, binary: [0x20, 0x00, 0x0b] } ]
-       Note: `locals` contains only internal local variables (not function parameters).
-globals: Array of global variable definitions.
-         Example: [ { gtype: 127, mutable: true, initExpr: [0x41, 0x00, 0x0b] } ]
-dataSegs: Array of data segments to initialize memory.
-          Example: [ { offset: [0x41, 0x00, 0x0b], bytes: [0x68, 0x69] } ]
-memory: Object defining memory requirements.
-        Example: { min: 1, max: 2, open: true } (open defines if "memory" is exported)
+             Example: [ { locals: [{ name: "x", type: 127 }], binary: [0x20, 0x00, 0x0b] } ]
+globals:     Array of global variable definitions.
+             Example: [ { gtype: 127, mutable: true, initExpr: [0x41, 0x00, 0x0b] } ]
+dataSegs:    Array of data segments to initialise memory.
+             Example: [ { offset: 0, bytes: [0x68, 0x69] } ]
+memory:      Object defining memory requirements.
+             Example: { min: 1, max: 2, open: true }  (open = export "memory")
 */
 function formatBinary(functions = [], imports = [], exports = {}, executables = [], globals = [], dataSegs = [], memory = null) {
     const binary = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
@@ -395,6 +423,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
     const mapped_imports    = imports.map(imp => ({ ...imp, typeIndex: getOrAddType(imp.input, imp.output) }));
     const func_type_indices = functions.map(fn  => getOrAddType(fn.input, fn.output));
 
+    // Section 1 — Type
     if (types.length) {
         binary.push(0x01);
         let size = encodeULEB128(types.length).length;
@@ -405,6 +434,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         });
     }
 
+    // Section 2 — Import
     if (mapped_imports.length) {
         binary.push(0x02);
         const enc_imp = mapped_imports.map((imp) => {
@@ -418,6 +448,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         enc_imp.forEach((e) => binary.push(...e));
     }
 
+    // Section 3 — Function
     if (func_type_indices.length) {
         binary.push(0x03);
         let size = encodeULEB128(func_type_indices.length).length;
@@ -426,6 +457,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         func_type_indices.forEach((type_idx) => binary.push(...encodeULEB128(type_idx)));
     }
 
+    // Section 5 — Memory
     if (memory) {
         const has_max = memory.max != null;
         const min_enc = encodeULEB128(memory.min);
@@ -436,6 +468,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         if (has_max) binary.push(...max_enc);
     }
 
+    // Section 6 — Global
     if (globals.length) {
         binary.push(0x06);
         let size = encodeULEB128(globals.length).length;
@@ -446,6 +479,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         });
     }
 
+    // Section 7 — Export
     const export_entries = Object.entries(exports);
     if (export_entries.length || memory?.open) {
         binary.push(0x07);
@@ -458,9 +492,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         export_entries.forEach(([name, idx]) => {
             size += 1 + name.length + 1 + encodeULEB128(idx).length;
         });
-        if (memory?.open) {
-            size += 1 + mem_export_name.length + 1 + 1;
-        }
+        if (memory?.open) size += 1 + mem_export_name.length + 1 + 1;
 
         binary.push(...encodeULEB128(size), ...encodeULEB128(total_exports));
         export_entries.forEach(([name, idx]) => {
@@ -473,13 +505,17 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         }
     }
 
+    // Section 10 — Code
     if (executables.length) {
         binary.push(0x0a);
 
-        const bodies = executables.map((fn, fn_idx) => {
-            if (typeof fn === 'string' || fn instanceof String) throw new CompilationError(`Could not find an executable for ${fn}`, "formatBinary")
+        const bodies = executables.map((fn) => {
+            if (typeof fn === 'string' || fn instanceof String)
+                throw new CompilationError(`Could not find an executable for '${fn}'`, "formatBinary");
+
             const local_values = fn.locals.map(l => l.type);
 
+            // Run-length encode locals by type
             const groups = [];
             let i = 0;
             while (i < local_values.length) {
@@ -500,11 +536,17 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
         bodies.forEach((b) => binary.push(...b));
     }
 
+    // Section 11 — Data
     if (dataSegs.length) {
         binary.push(0x0b);
+
+        // Opcodes from the single source of truth
+        const I32_CONST = encodeWasmInstruction("const", [], "int32")[0];
+        const END       = encodeWasmInstruction("end")[0];
+
         const segs = dataSegs.map((seg) => [
             0x00,
-            0x41, ...encodeSLEB128(seg.offset), 0x0b,
+            I32_CONST, ...encodeSLEB128(seg.offset), END,
             ...encodeULEB128(seg.bytes.length),
             ...seg.bytes,
         ]);
@@ -516,6 +558,7 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
 
     return new Uint8Array(binary);
 }
+
 
 function encodeULEB128(v) {
     v = BigInt(v || 0);
@@ -557,45 +600,70 @@ function encodeF64(v) {
     return [...new Uint8Array(buf)];
 }
 
-function encodeWasmInstruction(inst, stack = []) { 
-    const types = { empty: 0x40, int32: 0x7f, int64: 0x7e, float32: 0x7d, float64: 0x7c };
-    if (types[inst]) return [types[inst]]; 
+
+function encodeWasmInstruction(inst, stack = [], arg = null) {
+
     
-    const ops = {
-        nop:      { arity: 0, opcode: [0x01] },
-        return:   { arity: 0, opcode: [0x0F] },
-         
-        clz:      { arity: 1, opcodes: { 0x7f: [0x67], 0x7e: [0x79] } }, 
-        eqz:      { arity: 1, opcodes: { 0x7f: [0x45], 0x7e: [0x50] } }, 
-        
-        add:      { arity: 2, opcodes: { 0x7f: [0x6A], 0x7e: [0x7C] } },
-        sub:      { arity: 2, opcodes: { 0x7f: [0x6B], 0x7e: [0x7D] } },
-        subtract: { arity: 2, opcodes: { 0x7f: [0x6B], 0x7e: [0x7D] } },
-        mul:      { arity: 2, opcodes: { 0x7f: [0x6C], 0x7e: [0x7E] } }
+    const valueTypes = {
+        empty:   [0x40],
+        int32:   [0x7f],
+        int64:   [0x7e],
+        float32: [0x7d],
+        float64: [0x7c],
     };
+    if (valueTypes[inst] !== undefined) return valueTypes[inst];
 
-    const operation = ops[inst];
-    if (!operation) return null;
+    
+    const simpleOps = {
+        nop:           [0x01],
+        "return":      [0x0f],
+        end:           [0x0b],
+        call:          [0x10],
+        "local.get":   [0x20],
+        "local.set":   [0x21],
+    };
+    if (simpleOps[inst] !== undefined) return simpleOps[inst];
 
-    const { arity, opcodes, opcode } = operation;
-
-    if (arity === 0) return opcode;
-
-    if (stack.length < arity) {
-        throw new CompilationError(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
+    
+    if (inst === "const") {
+        const constOpcodes = {
+            int32:   [0x41],
+            int64:   [0x42],
+            float32: [0x43],
+            float64: [0x44],  
+        };
+        if (constOpcodes[arg] !== undefined) return constOpcodes[arg];
+        throw new CompilationError(`Unknown type '${arg}' for const instruction`);
     }
 
-    const operands = stack.slice(-arity);
+    const numericOps = {
+        clz:      { arity: 1, opcodes: { 0x7f: [0x67], 0x7e: [0x79] } },
+        eqz:      { arity: 1, opcodes: { 0x7f: [0x45], 0x7e: [0x50] } },
+        add:      { arity: 2, opcodes: { 0x7f: [0x6a], 0x7e: [0x7c], 0x7d: [0x92], 0x7c: [0xa0] } },
+        sub:      { arity: 2, opcodes: { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] } },
+        subtract: { arity: 2, opcodes: { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] } },
+        mul:      { arity: 2, opcodes: { 0x7f: [0x6c], 0x7e: [0x7e], 0x7d: [0x94], 0x7c: [0xa2] } },
+    };
+
+    const operation = numericOps[inst];
+    if (!operation) return null;
+
+    const { arity, opcodes } = operation;
+
+    if (stack.length < arity)
+        throw new CompilationError(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
+
+    const operands   = stack.slice(-arity);
     const targetType = operands[0];
 
-    const allMatch = operands.every(op => op === targetType);
-    if (!allMatch) {
-        const typesStr = operands.map(op => `0x${op.toString(16)}`).join(', ');
+    if (!operands.every(op => op === targetType)) {
+        const typesStr = operands.map(op => `0x${op.toString(16)}`).join(", ");
         throw new CompilationError(`Type mismatch for '${inst}': all ${arity} operands must match. Got [${typesStr}]`);
     }
 
     const finalOpcode = opcodes[targetType];
-    if (!finalOpcode) throw new CompilationError(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
+    if (!finalOpcode)
+        throw new CompilationError(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
 
     return finalOpcode;
 }
