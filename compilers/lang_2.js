@@ -195,6 +195,8 @@ function compile_executables(code, functions, executables) {
     let function_index;
     let depth = 0;
     const lines = code.split("\n");
+    let function_order = [...executables];
+    let full_function_name;
 
     lines.forEach((line) => {
         if (!line.trim()) return;
@@ -231,6 +233,7 @@ function compile_executables(code, functions, executables) {
 
             const key = `${service_name}.${name}`;
             function_index = executables.indexOf(key);
+            full_function_name = key;
 
             if (function_index === -1) throw new CompilationError(
                 `Function "${key}" was not found in the declaration.`,
@@ -255,6 +258,43 @@ function compile_executables(code, functions, executables) {
             else {
                 const inst = line.trim();
                 const binary = executables[function_index].binary;
+                // create v1 (int32)
+                // create v2 (int32)
+                // "5" => v1
+                // "4" => v2
+                // v1, v2 => v2, module.funtion1 => v2
+                if (line.startsWith("create ")){
+                    const remainder = line.slice(7).trimStart(); 
+                    const nameEndMatch = remainder.match(/[\s(]/);
+                    const nameEndIndex = nameEndMatch ? nameEndMatch.index : remainder.length;
+                    const name = remainder.slice(0, nameEndIndex);
+
+                    if (executables[function_index].locals[name]) {
+                        throw new CompilationError(
+                            `Local variable ${name} was already defined in function ${full_function_name}`,
+                            "compile_executables",
+                            line
+                        );
+                    }
+
+                    const typeStart = line.indexOf("(");
+                    const typeEnd = line.indexOf(")", typeStart);
+
+                    if (typeStart === -1 || typeEnd === -1) {
+                        throw new CompilationError(
+                            `Missing parentheses for type declaration`, 
+                            "compile_executables", 
+                            line
+                        );
+                    }
+
+                    const rawType = line.slice(typeStart + 1, typeEnd).trim();
+                    let type = encodeWasmInstruction(rawType);
+
+                    executables[function_index].locals[name] = type;
+                }
+
+
 
                 if (inst === "end") {
                     binary.push(0x0b);
