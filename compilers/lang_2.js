@@ -204,6 +204,7 @@ function compile_executables(code, functions, executables) {
         let isDepth0Line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ")
         if (isDepth0Line && !(depth == 0)) throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line)
         if (!isDepth0Line && depth == 0 && line != '{' && line != '}') throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line)
+    
 
         if (line.startsWith("@")) {
             serviceName = line.substring(1).trim();
@@ -262,7 +263,7 @@ function compile_executables(code, functions, executables) {
             executables[functionIndex] = { locals: initialLocals, binary: [] };
         } else {
             if (line == '{') depth++;
-            else if (line == '}') depth--;
+            else if (line == '}') {depth--; if (depth == 0) executables[functionIndex].binary.push(0x0b)};
             else {
                 const inst = line.trim();
                 const binary = executables[functionIndex].binary;
