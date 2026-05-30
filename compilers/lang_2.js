@@ -198,7 +198,7 @@ function compile_executables(code, functions, executables) {
     let functionOrder = [...executables];
     let localsOrder = [];
     let fullFunctionName;
-    let stack = [];
+    let stacktypes = [];
 
     lines.forEach((line) => {
         if (!line.trim()) return;
