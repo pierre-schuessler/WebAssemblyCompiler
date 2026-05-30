@@ -198,6 +198,7 @@ function compile_executables(code, functions, executables) {
     let functionOrder = [...executables];
     let localsOrder = [];
     let fullFunctionName;
+    let stack = [];
 
     lines.forEach((line) => {
         if (!line.trim()) return;
@@ -316,6 +317,7 @@ function compile_executables(code, functions, executables) {
                             if (targetFunctionIndex !== -1) {
                                 binary.push(0x10, targetFunctionIndex); 
                             } else {
+                                binary.push(...encodeWasmInstruction(element, stacktypes))
                                 throw new CompilationError(`Function ${element} not found.`, "compile_executables", line);
                             }
                         } else {
@@ -337,6 +339,7 @@ function compile_executables(code, functions, executables) {
                                     const localIndex = locals.findIndex(l => l.name === variableName);
                                     if (localIndex !== -1) {
                                         binary.push(0x20, localIndex);
+                                        stack.push(locals[localIndex].type)
                                     } else {
                                         throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
                                     }
@@ -549,7 +552,45 @@ function encodeF64(v) {
     return [...new Uint8Array(buf)];
 }
 
-function encodeWasmInstruction(instruction) {
-    const bt = { empty: 0x40, int32: 0x7f, int64: 0x7e, float32: 0x7d, float64: 0x7c };
-    if (instruction in bt) return bt[instruction];
+function encodeWasmInstruction(inst, stack = []) { 
+    const types = { empty: 0x40, int32: 0x7f, int64: 0x7e, float32: 0x7d, float64: 0x7c };
+    if (types[inst]) return [types[inst]]; 
+    
+    const ops = {
+        nop:      { arity: 0, opcode: [0x01] },
+        return:   { arity: 0, opcode: [0x0F] },
+         
+        clz:      { arity: 1, opcodes: { 0x7f: [0x67], 0x7e: [0x79] } }, 
+        eqz:      { arity: 1, opcodes: { 0x7f: [0x45], 0x7e: [0x50] } }, 
+        
+        add:      { arity: 2, opcodes: { 0x7f: [0x6A], 0x7e: [0x7C] } },
+        sub:      { arity: 2, opcodes: { 0x7f: [0x6B], 0x7e: [0x7D] } },
+        subtract: { arity: 2, opcodes: { 0x7f: [0x6B], 0x7e: [0x7D] } },
+        mul:      { arity: 2, opcodes: { 0x7f: [0x6C], 0x7e: [0x7E] } }
+    };
+
+    const operation = ops[inst];
+    if (!operation) throw new Error(`Unknown instruction: ${inst}`);
+
+    const { arity, opcodes, opcode } = operation;
+
+    if (arity === 0) return opcode;
+
+    if (stack.length < arity) {
+        throw new Error(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
+    }
+
+    const operands = stack.slice(-arity);
+    const targetType = operands[0];
+
+    const allMatch = operands.every(op => op === targetType);
+    if (!allMatch) {
+        const typesStr = operands.map(op => `0x${op.toString(16)}`).join(', ');
+        throw new Error(`Type mismatch for '${inst}': all ${arity} operands must match. Got [${typesStr}]`);
+    }
+
+    const finalOpcode = opcodes[targetType];
+    if (!finalOpcode) throw new Error(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
+
+    return finalOpcode;
 }
