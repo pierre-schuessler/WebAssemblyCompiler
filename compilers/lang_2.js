@@ -332,7 +332,7 @@ function compile_executables(code, functions, executables) {
                                     } else {
                                         let instruction = encodeWasmInstruction(variableName, stacktypes);
                                         if (instruction) binary.push(...instruction)
-                                        throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
+                                        else throw new CompilationError(`Local variable ${variableName} not found.`, "compile_executables", line);
                                     }
                                 });
                             } else {
