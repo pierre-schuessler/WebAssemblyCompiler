@@ -263,7 +263,12 @@ function compile_executables(code, functions, executables) {
             executables[functionIndex] = { locals: initialLocals, binary: [] };
         } else {
             if (line == '{') depth++;
-            else if (line == '}') {depth--; if (depth == 0) executables[functionIndex].binary.push(0x0b)};
+            else if (line == '}') {
+                depth--;
+                if (depth == 0) {
+                    executables[functionIndex].binary.push(0x0b)
+                }
+            }
             else {
                 const inst = line.trim();
                 const binary = executables[functionIndex].binary;
