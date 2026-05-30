@@ -122,7 +122,7 @@ function compile_imports(code, imports) {
         const extractTypes = (typeString) => {
             if (!typeString) return [];
             const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-            return matches.map(match => encodeWasmInstruction(match[1]));
+            return matches.map(match => encodeWasmInstruction(match[1])[0]); // FIX 1
         };
 
         imports.push({
@@ -167,7 +167,7 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
         const extractTypes = (typeString) => {
             if (!typeString) return [];
             const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-            return matches.map(match => encodeWasmInstruction(match[1]));
+            return matches.map(match => encodeWasmInstruction(match[1])[0]); // FIX 1
         };
 
         const signature = {
@@ -228,7 +228,7 @@ function compile_executables(code, functions, executables) {
             const extractTypes = (typeString) => {
                 if (!typeString) return [];
                 const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-                return matches.map(match => encodeWasmInstruction(match[1]));
+                return matches.map(match => encodeWasmInstruction(match[1])[0]); // FIX 1
             };
 
             const bodyInput  = extractTypes(inputPart);
@@ -261,6 +261,7 @@ function compile_executables(code, functions, executables) {
                 };
             });
 
+            stacktypes = []; // FIX 3: reset per function
             executables[functionIndex] = { locals: initialLocals, binary: [] };
         } else {
             if (line == '{') depth++;
@@ -304,7 +305,7 @@ function compile_executables(code, functions, executables) {
                     }
 
                     const rawType = line.slice(typeStart + 1, typeEnd).trim();
-                    let type = encodeWasmInstruction(rawType);
+                    let type = encodeWasmInstruction(rawType)[0]; // FIX 2
 
                     executables[functionIndex].locals.push({ name, type });
                 } else {
