@@ -572,7 +572,7 @@ function encodeWasmInstruction(inst, stack = []) {
     };
 
     const operation = ops[inst];
-    return null;
+    if (!operation) return null;
 
     const { arity, opcodes, opcode } = operation;
 
