@@ -189,6 +189,161 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
     });
 }
 
+function extractTypes(typeString) {
+    if (!typeString) return [];
+    const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
+    return matches.map(match => encodeWasmInstruction(match[1]).opcode[0]);
+}
+
+function parseFunctionSignature(line, serviceName, functions, executables) {
+    const cleanLine = line.substring(9);
+    const [definitionPart, outputPart] = cleanLine.split("=>").map(s => s.trim());
+    const [name, inputPart]            = definitionPart.split(":").map(s => s.trim());
+
+    if (!name) throw new CompilationError(
+        "You must specify the name of the function.",
+        "compile_executables", line
+    );
+
+    if (inputPart === undefined || outputPart === undefined) throw new CompilationError(
+        `Missing signature. Expected format: endpoint ${name}: (type)... => (type)...`,
+        "compile_executables", line
+    );
+
+    const bodyInput  = extractTypes(inputPart);
+    const bodyOutput = extractTypes(outputPart);
+
+    const key = `${serviceName}.${name}`;
+    const functionIndex = executables.indexOf(key);
+
+    if (functionIndex === -1) throw new CompilationError(
+        `Function "${key}" was not found in the declaration.`,
+        "compile_executables"
+    );
+
+    const declared = functions[functionIndex];
+    if (
+        JSON.stringify(bodyInput)  !== JSON.stringify(declared.input) ||
+        JSON.stringify(bodyOutput) !== JSON.stringify(declared.output)
+    ) throw new CompilationError(
+        `Signature mismatch for "${key}". ` +
+        `Body says (${bodyInput}) => (${bodyOutput}) ` +
+        `but declaration says (${declared.input}) => (${declared.output}).`,
+        "compile_executables", line
+    );
+
+    const initialLocals = bodyInput.map((type, index) => ({ name: `arg${index}`, type }));
+    return { key, functionIndex, initialLocals };
+}
+
+function handleVariableCreation(line, executable, fullFunctionName) {
+    const remainder    = line.slice(7).trimStart();
+    const nameEndMatch = remainder.match(/[\s(]/);
+    const nameEndIndex = nameEndMatch ? nameEndMatch.index : remainder.length;
+    const name         = remainder.slice(0, nameEndIndex);
+
+    if (executable.locals.some(l => l.name === name)) {
+        throw new CompilationError(
+            `Local variable '${name}' was already defined in function '${fullFunctionName}'`,
+            "compile_executables", line
+        );
+    }
+
+    const typeStart = line.indexOf("(");
+    const typeEnd   = line.indexOf(")", typeStart);
+
+    if (typeStart === -1 || typeEnd === -1) {
+        throw new CompilationError(
+            "Missing parentheses for type declaration",
+            "compile_executables", line
+        );
+    }
+
+    const rawType = line.slice(typeStart + 1, typeEnd).trim();
+    const type    = encodeWasmInstruction(rawType).opcode[0];
+
+    executable.locals.push({ name, type });
+}
+
+
+function handleInstruction(instructionName, binary, stacktypes, line, notFoundMessage) {
+    const instructionData = encodeWasmInstruction(instructionName, stacktypes);
+    if (instructionData) {
+        binary.push(...instructionData.opcode);
+        if (instructionData.popCount !== undefined) {
+            for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
+            if (instructionData.pushType) stacktypes.push(instructionData.pushType);
+        }
+    } else {
+        throw new CompilationError(notFoundMessage, "compile_executables", line);
+    }
+}
+
+function handleFunctionCall(element, executables, functions, binary, stacktypes, line) {
+    const targetFunctionIndex = executables.indexOf(element);
+    if (targetFunctionIndex !== -1) {
+        binary.push(encodeWasmInstruction("call").opcode[0], targetFunctionIndex);
+        
+        const targetSig = functions[targetFunctionIndex];
+        for (let p = 0; p < targetSig.input.length; p++) stacktypes.pop();
+        for (let p = 0; p < targetSig.output.length; p++) stacktypes.push(targetSig.output[p]);
+    } else {
+        handleInstruction(element, binary, stacktypes, line, `Function '${element}' not found.`);
+    }
+}
+
+function handleConstant(token, binary, stacktypes, line) {
+    const constMatch = /^\((\w+)\)(.+)$/.exec(token);
+    if (!constMatch) return false;
+
+    const typeName = constMatch[1];
+    const valueStr = constMatch[2].trim();
+    const typeCode = encodeWasmInstruction(typeName).opcode[0];
+
+    if (typeCode === undefined)
+        throw new CompilationError(`Unknown type '${typeName}' in constant`, "compile_executables", line);
+
+    const constRes = encodeWasmInstruction("const", [], typeName);
+    const constOpcode = constRes.opcode ? constRes.opcode : constRes;
+    if (!constOpcode)
+        throw new CompilationError(`Type '${typeName}' does not support const`, "compile_executables", line);
+
+    binary.push(...constOpcode);
+
+    if      (typeName === "int32")   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
+    else if (typeName === "int64")   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
+    else if (typeName === "float32") binary.push(...encodeF32(parseFloat(valueStr)));
+    else if (typeName === "float64") binary.push(...encodeF64(parseFloat(valueStr)));
+
+    stacktypes.push(typeCode);
+    return true;
+}
+
+function handleToken(token, isOutput, locals, binary, stacktypes, line) {
+    const localIndex = locals.findIndex(l => l.name === token);
+
+    
+    if (localIndex !== -1) {
+        if (isOutput) {
+            binary.push(encodeWasmInstruction("local.set").opcode[0], localIndex);
+            stacktypes.pop();
+        } else {
+            binary.push(encodeWasmInstruction("local.get").opcode[0], localIndex);
+            stacktypes.push(locals[localIndex].type);
+        }
+        return;
+    }
+
+    
+    if (!isOutput && handleConstant(token, binary, stacktypes, line)) {
+        return;
+    }
+
+    
+    handleInstruction(token, binary, stacktypes, line, `Local variable '${token}' not found.`);
+}
+
+
 function compile_executables(code, functions, executables) {
     if (!code.trim()) return;
 
@@ -210,54 +365,13 @@ function compile_executables(code, functions, executables) {
             serviceName = line.substring(1).trim();
 
         } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
-            const cleanLine = line.substring(9);
-
-            const [definitionPart, outputPart] = cleanLine.split("=>").map(s => s.trim());
-            const [name, inputPart]            = definitionPart.split(":").map(s => s.trim());
-
-            if (!name) throw new CompilationError(
-                "You must specify the name of the function.",
-                "compile_executables", line
-            );
-
-            if (inputPart === undefined || outputPart === undefined) throw new CompilationError(
-                `Missing signature. Expected format: endpoint ${name}: (type)... => (type)...`,
-                "compile_executables", line
-            );
-
-            const extractTypes = (typeString) => {
-                if (!typeString) return [];
-                const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-                return matches.map(match => encodeWasmInstruction(match[1]).opcode[0]);
-            };
-
-            const bodyInput  = extractTypes(inputPart);
-            const bodyOutput = extractTypes(outputPart);
-
-            const key = `${serviceName}.${name}`;
-            functionIndex = executables.indexOf(key);
-            fullFunctionName = key;
-
-            if (functionIndex === -1) throw new CompilationError(
-                `Function "${key}" was not found in the declaration.`,
-                "compile_executables"
-            );
-
-            const declared = functions[functionIndex];
-            if (
-                JSON.stringify(bodyInput)  !== JSON.stringify(declared.input) ||
-                JSON.stringify(bodyOutput) !== JSON.stringify(declared.output)
-            ) throw new CompilationError(
-                `Signature mismatch for "${key}". ` +
-                `Body says (${bodyInput}) => (${bodyOutput}) ` +
-                `but declaration says (${declared.input}) => (${declared.output}).`,
-                "compile_executables", line
-            );
-
-            const initialLocals = bodyInput.map((type, index) => ({ name: `arg${index}`, type }));
-
-            stacktypes = [];
-            executables[functionIndex] = { locals: initialLocals, binary: [] };
+            const parsedInfo = parseFunctionSignature(line, serviceName, functions, executables);
+            
+            functionIndex    = parsedInfo.functionIndex;
+            fullFunctionName = parsedInfo.key;
+            stacktypes       = [];
+            
+            executables[functionIndex] = { locals: parsedInfo.initialLocals, binary: [] };
 
         } else {
             if (line === '{') {
@@ -268,131 +382,25 @@ function compile_executables(code, functions, executables) {
                     executables[functionIndex].binary.push(encodeWasmInstruction("end").opcode[0]);
                 }
             } else {
-                const binary = executables[functionIndex].binary;
+                const executable = executables[functionIndex];
+                const binary     = executable.binary;
+                const locals     = executable.locals;
 
                 if (line.startsWith("create ")) {
-                    const remainder    = line.slice(7).trimStart();
-                    const nameEndMatch = remainder.match(/[\s(]/);
-                    const nameEndIndex = nameEndMatch ? nameEndMatch.index : remainder.length;
-                    const name         = remainder.slice(0, nameEndIndex);
-
-                    if (executables[functionIndex].locals.some(l => l.name === name)) {
-                        throw new CompilationError(
-                            `Local variable '${name}' was already defined in function '${fullFunctionName}'`,
-                            "compile_executables", line
-                        );
-                    }
-
-                    const typeStart = line.indexOf("(");
-                    const typeEnd   = line.indexOf(")", typeStart);
-
-                    if (typeStart === -1 || typeEnd === -1) {
-                        throw new CompilationError(
-                            "Missing parentheses for type declaration",
-                            "compile_executables", line
-                        );
-                    }
-
-                    const rawType = line.slice(typeStart + 1, typeEnd).trim();
-                    const type    = encodeWasmInstruction(rawType).opcode[0];
-
-                    executables[functionIndex].locals.push({ name, type });
-
+                    handleVariableCreation(line, executable, fullFunctionName);
                 } else {
                     const computationalElements = line.split("=>").map(el => el.trim());
 
                     for (let i = 0; i < computationalElements.length; i++) {
                         const element = computationalElements[i];
-                        const locals  = executables[functionIndex].locals;
-
                         const isConstantElement = /^\((\w+)\)/.test(element);
+                        const isOutput = (i === computationalElements.length - 1);
 
                         if (!isConstantElement && element.includes(".")) {
-                            const targetFunctionIndex = executables.indexOf(element);
-                            if (targetFunctionIndex !== -1) {
-                                binary.push(encodeWasmInstruction("call").opcode[0], targetFunctionIndex);
-                                
-                                const targetSig = functions[targetFunctionIndex];
-                                for (let p = 0; p < targetSig.input.length; p++) stacktypes.pop();
-                                for (let p = 0; p < targetSig.output.length; p++) stacktypes.push(targetSig.output[p]);
-                            } else {
-                                const instructionData = encodeWasmInstruction(element, stacktypes);
-                                if (instructionData) {
-                                    binary.push(...instructionData.opcode);
-                                    if (instructionData.popCount !== undefined) {
-                                        for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
-                                        if (instructionData.pushType) stacktypes.push(instructionData.pushType);
-                                    }
-                                } else {
-                                    throw new CompilationError(`Function '${element}' not found.`, "compile_executables", line);
-                                }
-                            }
-
-                        } else if (i === computationalElements.length - 1) {
-                            element.split(",").map(v => v.trim()).forEach((variableName) => {
-                                const localIndex = locals.findIndex(l => l.name === variableName);
-                                if (localIndex !== -1) {
-                                    binary.push(encodeWasmInstruction("local.set").opcode[0], localIndex);
-                                    stacktypes.pop();
-                                } else {
-                                    const instructionData = encodeWasmInstruction(variableName, stacktypes);
-                                    if (instructionData) {
-                                        binary.push(...instructionData.opcode);
-                                        if (instructionData.popCount !== undefined) {
-                                            for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
-                                            if (instructionData.pushType) stacktypes.push(instructionData.pushType);
-                                        }
-                                    } else {
-                                        throw new CompilationError(`Local variable '${variableName}' not found.`, "compile_executables", line);
-                                    }
-                                }
-                            });
-
+                            handleFunctionCall(element, executables, functions, binary, stacktypes, line);
                         } else {
-                            element.split(",").map(v => v.trim()).forEach((variableName) => {
-                                const localIndex = locals.findIndex(l => l.name === variableName);
-
-                                if (localIndex !== -1) {
-                                    binary.push(encodeWasmInstruction("local.get").opcode[0], localIndex);
-                                    stacktypes.push(locals[localIndex].type);
-
-                                } else {
-                                    const constMatch = /^\((\w+)\)(.+)$/.exec(variableName);
-                                    if (constMatch) {
-                                        const typeName = constMatch[1];
-                                        const valueStr = constMatch[2].trim();
-                                        const typeCode = encodeWasmInstruction(typeName).opcode[0];
-
-                                        if (typeCode === undefined)
-                                            throw new CompilationError(`Unknown type '${typeName}' in constant`, "compile_executables", line);
-
-                                        const constRes = encodeWasmInstruction("const", [], typeName);
-                                        const constOpcode = constRes.opcode ? constRes.opcode : constRes;
-                                        if (!constOpcode)
-                                            throw new CompilationError(`Type '${typeName}' does not support const`, "compile_executables", line);
-
-                                        binary.push(...constOpcode);
-
-                                        if      (typeName === "int32")   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
-                                        else if (typeName === "int64")   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
-                                        else if (typeName === "float32") binary.push(...encodeF32(parseFloat(valueStr)));
-                                        else if (typeName === "float64") binary.push(...encodeF64(parseFloat(valueStr)));
-
-                                        stacktypes.push(typeCode);
-
-                                    } else {
-                                        const instructionData = encodeWasmInstruction(variableName, stacktypes);
-                                        if (instructionData) {
-                                            binary.push(...instructionData.opcode);
-                                            if (instructionData.popCount !== undefined) {
-                                                for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
-                                                if (instructionData.pushType) stacktypes.push(instructionData.pushType);
-                                            }
-                                        } else {
-                                            throw new CompilationError(`Local variable '${variableName}' not found.`, "compile_executables", line);
-                                        }
-                                    }
-                                }
+                            element.split(",").map(v => v.trim()).forEach(token => {
+                                handleToken(token, isOutput, locals, binary, stacktypes, line);
                             });
                         }
                     }
