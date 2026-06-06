@@ -123,7 +123,7 @@ function compile_imports(code, imports) {
         const extractTypes = (typeString) => {
             if (!typeString) return [];
             const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-            return matches.map(match => encodeWasmInstruction(match[1])[0]);
+            return matches.map(match => encodeWasmInstruction(match[1]).opcode[0]);
         };
 
         imports.push({
@@ -168,7 +168,7 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
         const extractTypes = (typeString) => {
             if (!typeString) return [];
             const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-            return matches.map(match => encodeWasmInstruction(match[1])[0]);
+            return matches.map(match => encodeWasmInstruction(match[1]).opcode[0]);
         };
 
         const signature = {
@@ -199,16 +199,6 @@ function compile_executables(code, functions, executables) {
     let fullFunctionName;
     let stacktypes = [];
 
-    const getOpcode = (name) => {
-        const res = encodeWasmInstruction(name);
-        return res.opcode ? res.opcode[0] : res[0];
-    };
-
-    const OPCODE_END       = getOpcode("end");
-    const OPCODE_CALL      = getOpcode("call");
-    const OPCODE_LOCAL_GET = getOpcode("local.get");
-    const OPCODE_LOCAL_SET = getOpcode("local.set");
-
     lines.forEach((line) => {
         if (!line.trim()) return;
 
@@ -238,7 +228,7 @@ function compile_executables(code, functions, executables) {
             const extractTypes = (typeString) => {
                 if (!typeString) return [];
                 const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-                return matches.map(match => getOpcode(match[1]));
+                return matches.map(match => encodeWasmInstruction(match[1]).opcode[0]);
             };
 
             const bodyInput  = extractTypes(inputPart);
@@ -275,7 +265,7 @@ function compile_executables(code, functions, executables) {
             } else if (line === '}') {
                 depth--;
                 if (depth === 0) {
-                    executables[functionIndex].binary.push(OPCODE_END);
+                    executables[functionIndex].binary.push(encodeWasmInstruction("end").opcode[0]);
                 }
             } else {
                 const binary = executables[functionIndex].binary;
@@ -304,7 +294,7 @@ function compile_executables(code, functions, executables) {
                     }
 
                     const rawType = line.slice(typeStart + 1, typeEnd).trim();
-                    const type    = getOpcode(rawType);
+                    const type    = encodeWasmInstruction(rawType).opcode[0];
 
                     executables[functionIndex].locals.push({ name, type });
 
@@ -320,7 +310,7 @@ function compile_executables(code, functions, executables) {
                         if (!isConstantElement && element.includes(".")) {
                             const targetFunctionIndex = executables.indexOf(element);
                             if (targetFunctionIndex !== -1) {
-                                binary.push(OPCODE_CALL, targetFunctionIndex);
+                                binary.push(encodeWasmInstruction("call").opcode[0], targetFunctionIndex);
                                 
                                 const targetSig = functions[targetFunctionIndex];
                                 for (let p = 0; p < targetSig.input.length; p++) stacktypes.pop();
@@ -328,7 +318,7 @@ function compile_executables(code, functions, executables) {
                             } else {
                                 const instructionData = encodeWasmInstruction(element, stacktypes);
                                 if (instructionData) {
-                                    binary.push(...(instructionData.opcode || instructionData));
+                                    binary.push(...instructionData.opcode);
                                     if (instructionData.popCount !== undefined) {
                                         for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
                                         if (instructionData.pushType) stacktypes.push(instructionData.pushType);
@@ -342,12 +332,12 @@ function compile_executables(code, functions, executables) {
                             element.split(",").map(v => v.trim()).forEach((variableName) => {
                                 const localIndex = locals.findIndex(l => l.name === variableName);
                                 if (localIndex !== -1) {
-                                    binary.push(OPCODE_LOCAL_SET, localIndex);
+                                    binary.push(encodeWasmInstruction("local.set").opcode[0], localIndex);
                                     stacktypes.pop();
                                 } else {
                                     const instructionData = encodeWasmInstruction(variableName, stacktypes);
                                     if (instructionData) {
-                                        binary.push(...(instructionData.opcode || instructionData));
+                                        binary.push(...instructionData.opcode);
                                         if (instructionData.popCount !== undefined) {
                                             for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
                                             if (instructionData.pushType) stacktypes.push(instructionData.pushType);
@@ -363,7 +353,7 @@ function compile_executables(code, functions, executables) {
                                 const localIndex = locals.findIndex(l => l.name === variableName);
 
                                 if (localIndex !== -1) {
-                                    binary.push(OPCODE_LOCAL_GET, localIndex);
+                                    binary.push(encodeWasmInstruction("local.get").opcode[0], localIndex);
                                     stacktypes.push(locals[localIndex].type);
 
                                 } else {
@@ -371,7 +361,7 @@ function compile_executables(code, functions, executables) {
                                     if (constMatch) {
                                         const typeName = constMatch[1];
                                         const valueStr = constMatch[2].trim();
-                                        const typeCode = getOpcode(typeName);
+                                        const typeCode = encodeWasmInstruction(typeName).opcode[0];
 
                                         if (typeCode === undefined)
                                             throw new CompilationError(`Unknown type '${typeName}' in constant`, "compile_executables", line);
@@ -383,22 +373,17 @@ function compile_executables(code, functions, executables) {
 
                                         binary.push(...constOpcode);
 
-                                        const INT32   = getOpcode("int32");
-                                        const INT64   = getOpcode("int64");
-                                        const FLOAT32 = getOpcode("float32");
-                                        const FLOAT64 = getOpcode("float64");
-
-                                        if      (typeCode === INT32)   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
-                                        else if (typeCode === INT64)   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
-                                        else if (typeCode === FLOAT32) binary.push(...encodeF32(parseFloat(valueStr)));
-                                        else if (typeCode === FLOAT64) binary.push(...encodeF64(parseFloat(valueStr)));
+                                        if      (typeName === "int32")   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
+                                        else if (typeName === "int64")   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
+                                        else if (typeName === "float32") binary.push(...encodeF32(parseFloat(valueStr)));
+                                        else if (typeName === "float64") binary.push(...encodeF64(parseFloat(valueStr)));
 
                                         stacktypes.push(typeCode);
 
                                     } else {
                                         const instructionData = encodeWasmInstruction(variableName, stacktypes);
                                         if (instructionData) {
-                                            binary.push(...(instructionData.opcode || instructionData));
+                                            binary.push(...instructionData.opcode);
                                             if (instructionData.popCount !== undefined) {
                                                 for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
                                                 if (instructionData.pushType) stacktypes.push(instructionData.pushType);
@@ -567,9 +552,8 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
     if (dataSegs.length) {
         binary.push(0x0b);
 
-        // Opcodes from the single source of truth
-        const I32_CONST = encodeWasmInstruction("const", [], "int32")[0];
-        const END       = encodeWasmInstruction("end")[0];
+        const I32_CONST = encodeWasmInstruction("const", [], "int32").opcode[0];
+        const END       = encodeWasmInstruction("end").opcode[0];
 
         const segs = dataSegs.map((seg) => [
             0x00,
@@ -631,21 +615,21 @@ function encodeF64(v) {
 function encodeWasmInstruction(inst, stack = [], arg = null) {
 
     const valueTypes = {
-        empty:   [0x40],
-        int32:   [0x7f],
-        int64:   [0x7e],
-        float32: [0x7d],
-        float64: [0x7c],
+        empty:   { opcode: [0x40] },
+        int32:   { opcode: [0x7f] },
+        int64:   { opcode: [0x7e] },
+        float32: { opcode: [0x7d] },
+        float64: { opcode: [0x7c] },
     };
     if (valueTypes[inst] !== undefined) return valueTypes[inst];
 
     const simpleOps = {
-        nop:           [0x01],
-        "return":      [0x0f],
-        end:           [0x0b],
-        call:          [0x10],
-        "local.get":   [0x20],
-        "local.set":   [0x21],
+        nop:           { opcode: [0x01] },
+        "return":      { opcode: [0x0f] },
+        end:           { opcode: [0x0b] },
+        call:          { opcode: [0x10] },
+        "local.get":   { opcode: [0x20] },
+        "local.set":   { opcode: [0x21] },
     };
     if (simpleOps[inst] !== undefined) return simpleOps[inst];
 
@@ -656,11 +640,11 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
             float32: [0x43],
             float64: [0x44],  
         };
-        if (constOpcodes[arg] !== undefined) return { opcode: constOpcodes[arg], popCount: 0, pushType: valueTypes[arg][0] };
+        if (constOpcodes[arg] !== undefined) return { opcode: constOpcodes[arg], popCount: 0, pushType: valueTypes[arg].opcode[0] };
         throw new CompilationError(`Unknown type '${arg}' for const instruction`);
     }
 
-    const I32 = 0x7f;
+    const I32 = encodeWasmInstruction("int32").opcode[0];
 
     
     const numericOps = {
