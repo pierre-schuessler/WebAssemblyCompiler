@@ -199,11 +199,15 @@ function compile_executables(code, functions, executables) {
     let fullFunctionName;
     let stacktypes = [];
 
-    
-    const OPCODE_END       = encodeWasmInstruction("end")[0];
-    const OPCODE_CALL      = encodeWasmInstruction("call")[0];
-    const OPCODE_LOCAL_GET = encodeWasmInstruction("local.get")[0];
-    const OPCODE_LOCAL_SET = encodeWasmInstruction("local.set")[0];
+    const getOpcode = (name) => {
+        const res = encodeWasmInstruction(name);
+        return res.opcode ? res.opcode[0] : res[0];
+    };
+
+    const OPCODE_END       = getOpcode("end");
+    const OPCODE_CALL      = getOpcode("call");
+    const OPCODE_LOCAL_GET = getOpcode("local.get");
+    const OPCODE_LOCAL_SET = getOpcode("local.set");
 
     lines.forEach((line) => {
         if (!line.trim()) return;
@@ -219,7 +223,7 @@ function compile_executables(code, functions, executables) {
             const cleanLine = line.substring(9);
 
             const [definitionPart, outputPart] = cleanLine.split("=>").map(s => s.trim());
-            const [name, inputPart]             = definitionPart.split(":").map(s => s.trim());
+            const [name, inputPart]            = definitionPart.split(":").map(s => s.trim());
 
             if (!name) throw new CompilationError(
                 "You must specify the name of the function.",
@@ -234,7 +238,7 @@ function compile_executables(code, functions, executables) {
             const extractTypes = (typeString) => {
                 if (!typeString) return [];
                 const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-                return matches.map(match => encodeWasmInstruction(match[1])[0]);
+                return matches.map(match => getOpcode(match[1]));
             };
 
             const bodyInput  = extractTypes(inputPart);
@@ -300,7 +304,7 @@ function compile_executables(code, functions, executables) {
                     }
 
                     const rawType = line.slice(typeStart + 1, typeEnd).trim();
-                    const type    = encodeWasmInstruction(rawType)[0];
+                    const type    = getOpcode(rawType);
 
                     executables[functionIndex].locals.push({ name, type });
 
@@ -314,14 +318,24 @@ function compile_executables(code, functions, executables) {
                         const isConstantElement = /^\((\w+)\)/.test(element);
 
                         if (!isConstantElement && element.includes(".")) {
-                            // CALL instruction
                             const targetFunctionIndex = executables.indexOf(element);
                             if (targetFunctionIndex !== -1) {
                                 binary.push(OPCODE_CALL, targetFunctionIndex);
+                                
+                                const targetSig = functions[targetFunctionIndex];
+                                for (let p = 0; p < targetSig.input.length; p++) stacktypes.pop();
+                                for (let p = 0; p < targetSig.output.length; p++) stacktypes.push(targetSig.output[p]);
                             } else {
-                                const instruction = encodeWasmInstruction(element, stacktypes);
-                                if (instruction) binary.push(...instruction);
-                                throw new CompilationError(`Function '${element}' not found.`, "compile_executables", line);
+                                const instructionData = encodeWasmInstruction(element, stacktypes);
+                                if (instructionData) {
+                                    binary.push(...(instructionData.opcode || instructionData));
+                                    if (instructionData.popCount !== undefined) {
+                                        for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
+                                        if (instructionData.pushType) stacktypes.push(instructionData.pushType);
+                                    }
+                                } else {
+                                    throw new CompilationError(`Function '${element}' not found.`, "compile_executables", line);
+                                }
                             }
 
                         } else if (i === computationalElements.length - 1) {
@@ -329,10 +343,18 @@ function compile_executables(code, functions, executables) {
                                 const localIndex = locals.findIndex(l => l.name === variableName);
                                 if (localIndex !== -1) {
                                     binary.push(OPCODE_LOCAL_SET, localIndex);
+                                    stacktypes.pop();
                                 } else {
-                                    const instruction = encodeWasmInstruction(variableName, stacktypes);
-                                    if (instruction) binary.push(...instruction);
-                                    else throw new CompilationError(`Local variable '${variableName}' not found.`, "compile_executables", line);
+                                    const instructionData = encodeWasmInstruction(variableName, stacktypes);
+                                    if (instructionData) {
+                                        binary.push(...(instructionData.opcode || instructionData));
+                                        if (instructionData.popCount !== undefined) {
+                                            for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
+                                            if (instructionData.pushType) stacktypes.push(instructionData.pushType);
+                                        }
+                                    } else {
+                                        throw new CompilationError(`Local variable '${variableName}' not found.`, "compile_executables", line);
+                                    }
                                 }
                             });
 
@@ -341,31 +363,30 @@ function compile_executables(code, functions, executables) {
                                 const localIndex = locals.findIndex(l => l.name === variableName);
 
                                 if (localIndex !== -1) {
-                                    
                                     binary.push(OPCODE_LOCAL_GET, localIndex);
                                     stacktypes.push(locals[localIndex].type);
 
                                 } else {
-                                    
                                     const constMatch = /^\((\w+)\)(.+)$/.exec(variableName);
                                     if (constMatch) {
                                         const typeName = constMatch[1];
                                         const valueStr = constMatch[2].trim();
-                                        const typeCode = encodeWasmInstruction(typeName)?.[0];
+                                        const typeCode = getOpcode(typeName);
 
                                         if (typeCode === undefined)
                                             throw new CompilationError(`Unknown type '${typeName}' in constant`, "compile_executables", line);
 
-                                        const constOpcode = encodeWasmInstruction("const", [], typeName);
+                                        const constRes = encodeWasmInstruction("const", [], typeName);
+                                        const constOpcode = constRes.opcode ? constRes.opcode : constRes;
                                         if (!constOpcode)
                                             throw new CompilationError(`Type '${typeName}' does not support const`, "compile_executables", line);
 
                                         binary.push(...constOpcode);
 
-                                        const INT32  = encodeWasmInstruction("int32")[0];
-                                        const INT64  = encodeWasmInstruction("int64")[0];
-                                        const FLOAT32 = encodeWasmInstruction("float32")[0];
-                                        const FLOAT64 = encodeWasmInstruction("float64")[0];
+                                        const INT32   = getOpcode("int32");
+                                        const INT64   = getOpcode("int64");
+                                        const FLOAT32 = getOpcode("float32");
+                                        const FLOAT64 = getOpcode("float64");
 
                                         if      (typeCode === INT32)   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
                                         else if (typeCode === INT64)   binary.push(...encodeSLEB128(parseInt(valueStr, 10)));
@@ -375,9 +396,16 @@ function compile_executables(code, functions, executables) {
                                         stacktypes.push(typeCode);
 
                                     } else {
-                                        const instruction = encodeWasmInstruction(variableName, stacktypes);
-                                        if (instruction) binary.push(...instruction);
-                                        else throw new CompilationError(`Local variable '${variableName}' not found.`, "compile_executables", line);
+                                        const instructionData = encodeWasmInstruction(variableName, stacktypes);
+                                        if (instructionData) {
+                                            binary.push(...(instructionData.opcode || instructionData));
+                                            if (instructionData.popCount !== undefined) {
+                                                for (let p = 0; p < instructionData.popCount; p++) stacktypes.pop();
+                                                if (instructionData.pushType) stacktypes.push(instructionData.pushType);
+                                            }
+                                        } else {
+                                            throw new CompilationError(`Local variable '${variableName}' not found.`, "compile_executables", line);
+                                        }
                                     }
                                 }
                             });
@@ -388,7 +416,6 @@ function compile_executables(code, functions, executables) {
         }
     });
 }
-
 
 /*
 FormatBinary arguments
@@ -603,7 +630,6 @@ function encodeF64(v) {
 
 function encodeWasmInstruction(inst, stack = [], arg = null) {
 
-    
     const valueTypes = {
         empty:   [0x40],
         int32:   [0x7f],
@@ -613,7 +639,6 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
     };
     if (valueTypes[inst] !== undefined) return valueTypes[inst];
 
-    
     const simpleOps = {
         nop:           [0x01],
         "return":      [0x0f],
@@ -624,7 +649,6 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
     };
     if (simpleOps[inst] !== undefined) return simpleOps[inst];
 
-    
     if (inst === "const") {
         const constOpcodes = {
             int32:   [0x41],
@@ -632,23 +656,26 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
             float32: [0x43],
             float64: [0x44],  
         };
-        if (constOpcodes[arg] !== undefined) return constOpcodes[arg];
+        if (constOpcodes[arg] !== undefined) return { opcode: constOpcodes[arg], popCount: 0, pushType: valueTypes[arg][0] };
         throw new CompilationError(`Unknown type '${arg}' for const instruction`);
     }
 
+    const I32 = 0x7f;
+
+    
     const numericOps = {
-        clz:      { arity: 1, opcodes: { 0x7f: [0x67], 0x7e: [0x79] } },
-        eqz:      { arity: 1, opcodes: { 0x7f: [0x45], 0x7e: [0x50] } },
-        add:      { arity: 2, opcodes: { 0x7f: [0x6a], 0x7e: [0x7c], 0x7d: [0x92], 0x7c: [0xa0] } },
-        sub:      { arity: 2, opcodes: { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] } },
-        subtract: { arity: 2, opcodes: { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] } },
-        mul:      { arity: 2, opcodes: { 0x7f: [0x6c], 0x7e: [0x7e], 0x7d: [0x94], 0x7c: [0xa2] } },
+        clz:      { arity: 1, push: "same", opcodes: { 0x7f: [0x67], 0x7e: [0x79] } },
+        eqz:      { arity: 1, push: I32,    opcodes: { 0x7f: [0x45], 0x7e: [0x50] } },
+        add:      { arity: 2, push: "same", opcodes: { 0x7f: [0x6a], 0x7e: [0x7c], 0x7d: [0x92], 0x7c: [0xa0] } },
+        sub:      { arity: 2, push: "same", opcodes: { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] } },
+        subtract: { arity: 2, push: "same", opcodes: { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] } },
+        mul:      { arity: 2, push: "same", opcodes: { 0x7f: [0x6c], 0x7e: [0x7e], 0x7d: [0x94], 0x7c: [0xa2] } },
     };
 
     const operation = numericOps[inst];
     if (!operation) return null;
 
-    const { arity, opcodes } = operation;
+    const { arity, push, opcodes } = operation;
 
     if (stack.length < arity)
         throw new CompilationError(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
@@ -665,5 +692,9 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
     if (!finalOpcode)
         throw new CompilationError(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
 
-    return finalOpcode;
+    return {
+        opcode: finalOpcode,
+        popCount: arity,
+        pushType: push === "same" ? targetType : push
+    };
 }
