@@ -31,7 +31,7 @@ export function compile(code, libs = {}) {
     let executable_code = merge_executables(bodies_code, macros_code);
 
     compile_imports(import_code, imports);
-    compile_declaration(declaration_code, functions, exports, imports.length, executables);
+    memory = compile_declaration(declaration_code, functions, exports, imports.length, executables, memory);
     compile_executables(executable_code, functions, executables);
 
     const exportsForBinary = {};
@@ -140,14 +140,30 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
 
     let service_name;
     const lines = code.split("\n");
+    let memory = null;
 
     lines.forEach((line) => {
         if (!line.trim()) return;
 
         if (line.startsWith("@")) {
             service_name = line.substring(1).trim();
+            if (service_name == "memory") memory = {};
             return;
         }
+
+        if (service_name == "memory"){
+            if(line.startsWith("min: ")) {
+                memory.min = Number(line.substring(5))
+            }
+            if(line.startsWith("max: ")) {
+                memory.max = Number(line.substring(5))
+            }
+            if(line.startsWith("open: ")) {
+                memory.open = line.substring(6) === "true"
+            }
+            return;
+        }
+        
 
         if (!service_name) throw new CompilationError(
             "The declaration part must start with the opening of a new service via the @ syntax",
@@ -187,6 +203,7 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
             });
         }
     });
+    return memory;
 }
 
 function extractTypes(typeString) {
