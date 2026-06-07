@@ -159,7 +159,7 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
                 memory.max = Number(line.substring(5))
             }
             if(line.startsWith("open: ")) {
-                memory.open = line.substring(6) === "true"
+                memory.open = ["true", "yes", "y"].includes(line.substring(6).toLowerCase())
             }
             return;
         }
