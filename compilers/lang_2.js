@@ -654,100 +654,83 @@ function encodeF64(v) {
 
 
 function encodeWasmInstruction(inst, stack = [], arg = null) {
+    const args = Array.isArray(arg) ? arg : [arg];
 
-    const valueTypes = {
-        empty:   { opcode: [0x40] },
-        int32:   { opcode: [0x7f] },
-        int64:   { opcode: [0x7e] },
-        float32: { opcode: [0x7d] },
-        float64: { opcode: [0x7c] },
-    };
-    if (valueTypes[inst] !== undefined) return valueTypes[inst];
+    const resolvePolymorphicOp = (arity, push, opcodes) => {
+        if (stack.length < arity) {
+            throw new Error(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
+        }
 
-    if (Array.isArray(arg)) {
-        const immediateOps = {
-            "call":        { opcode: [0x10], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 0, pushType: null },
-            "local.get":   { opcode: [0x20], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 0, pushType: null },
-            "local.set":   { opcode: [0x21], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 1, pushType: null },
-            "local.tee":   { opcode: [0x22], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 0, pushType: null },
-            "br":          { opcode: [0x0c], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 0, pushType: null },
-            "br_if":       { opcode: [0x0d], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 1, pushType: null },
-            "memory.grow": { opcode: [0x40], encodeArg: (_) => [0x00], popCount: 1, pushType: 0x7f },
-            "memory.size": { opcode: [0x3f], encodeArg: (_) => [0x00], popCount: 0, pushType: 0x7f },
-            
-            "i32.load":    { opcode: [0x28], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7f },
-            "i64.load":    { opcode: [0x29], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7e },
-            "f32.load":    { opcode: [0x2a], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7d },
-            "f64.load":    { opcode: [0x2b], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7c },
-            
-            "i32.store":   { opcode: [0x36], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null },
-            "i64.store":   { opcode: [0x37], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null },
-            "f32.store":   { opcode: [0x38], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null },
-            "f64.store":   { opcode: [0x39], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null },
-        };
+        const operands = stack.slice(-arity);
+        const targetType = operands[0];
 
-        const entry = immediateOps[inst];
-        if (!entry) return null;
+        if (!operands.every(op => op === targetType)) {
+            const typesStr = operands.map(op => `0x${op.toString(16)}`).join(", ");
+            throw new Error(`Type mismatch for '${inst}': all ${arity} operands must match. Got [${typesStr}]`);
+        }
+
+        const finalOpcode = opcodes[targetType];
+        if (!finalOpcode) {
+            throw new Error(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
+        }
 
         return {
-            opcode:   [...entry.opcode, ...entry.encodeArg(arg)],
-            popCount: entry.popCount,
-            pushType: entry.pushType,
+            opcode: finalOpcode,
+            popCount: arity,
+            pushType: push === "same" ? targetType : push,
         };
-    }
-
-    const simpleOps = {
-        nop:          { opcode: [0x01] },
-        "return":     { opcode: [0x0f] },
-        end:          { opcode: [0x0b] }
-    };
-    if (simpleOps[inst] !== undefined) return simpleOps[inst];
-
-    if (inst === "const") {
-        const constOpcodes = {
-            int32:   [0x41],
-            int64:   [0x42],
-            float32: [0x43],
-            float64: [0x44],
-        };
-        if (constOpcodes[arg] !== undefined) return { opcode: constOpcodes[arg], popCount: 0, pushType: valueTypes[arg].opcode[0] };
-        throw new CompilationError(`Unknown type '${arg}' for const instruction`);
-    }
-
-    const I32 = encodeWasmInstruction("int32").opcode[0];
-
-    const numericOps = {
-        clz:      { arity: 1, push: "same", opcodes: { 0x7f: [0x67], 0x7e: [0x79] } },
-        eqz:      { arity: 1, push: I32,    opcodes: { 0x7f: [0x45], 0x7e: [0x50] } },
-        add:      { arity: 2, push: "same", opcodes: { 0x7f: [0x6a], 0x7e: [0x7c], 0x7d: [0x92], 0x7c: [0xa0] } },
-        sub:      { arity: 2, push: "same", opcodes: { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] } },
-        subtract: { arity: 2, push: "same", opcodes: { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] } },
-        mul:      { arity: 2, push: "same", opcodes: { 0x7f: [0x6c], 0x7e: [0x7e], 0x7d: [0x94], 0x7c: [0xa2] } },
     };
 
-    const operation = numericOps[inst];
-    if (!operation) return null;
+    switch (inst) {
+        case "empty":   return { opcode: [0x40] };
+        case "int32":   return { opcode: [0x7f] };
+        case "int64":   return { opcode: [0x7e] };
+        case "float32": return { opcode: [0x7d] };
+        case "float64": return { opcode: [0x7c] };
 
-    const { arity, push, opcodes } = operation;
+        case "nop":     return { opcode: [0x01], popCount: 0, pushType: null };
+        case "return":  return { opcode: [0x0f], popCount: 0, pushType: null };
+        case "end":     return { opcode: [0x0b], popCount: 0, pushType: null };
 
-    if (stack.length < arity)
-        throw new CompilationError(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
+        case "call":      return { opcode: [0x10, ...encodeULEB128(parseInt(args[0]))], popCount: 0, pushType: null };
+        case "local.get": return { opcode: [0x20, ...encodeULEB128(parseInt(args[0]))], popCount: 0, pushType: null };
+        case "local.set": return { opcode: [0x21, ...encodeULEB128(parseInt(args[0]))], popCount: 1, pushType: null };
+        case "local.tee": return { opcode: [0x22, ...encodeULEB128(parseInt(args[0]))], popCount: 0, pushType: null };
+        case "br":        return { opcode: [0x0c, ...encodeULEB128(parseInt(args[0]))], popCount: 0, pushType: null };
+        case "br_if":     return { opcode: [0x0d, ...encodeULEB128(parseInt(args[0]))], popCount: 1, pushType: null };
+        
+        case "memory.grow": return { opcode: [0x40, 0x00], popCount: 1, pushType: 0x7f };
+        case "memory.size": return { opcode: [0x3f, 0x00], popCount: 0, pushType: 0x7f };
 
-    const operands   = stack.slice(-arity);
-    const targetType = operands[0];
+        case "i32.load": return { opcode: [0x28, ...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7f };
+        case "i64.load": return { opcode: [0x29, ...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7e };
+        case "f32.load": return { opcode: [0x2a, ...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7d };
+        case "f64.load": return { opcode: [0x2b, ...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7c };
 
-    if (!operands.every(op => op === targetType)) {
-        const typesStr = operands.map(op => `0x${op.toString(16)}`).join(", ");
-        throw new CompilationError(`Type mismatch for '${inst}': all ${arity} operands must match. Got [${typesStr}]`);
+        case "i32.store": return { opcode: [0x36, ...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null };
+        case "i64.store": return { opcode: [0x37, ...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null };
+        case "f32.store": return { opcode: [0x38, ...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null };
+        case "f64.store": return { opcode: [0x39, ...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null };
+
+        case "const": {
+            const type = args[0];
+            switch (type) {
+                case "int32":   return { opcode: [0x41], popCount: 0, pushType: 0x7f };
+                case "int64":   return { opcode: [0x42], popCount: 0, pushType: 0x7e };
+                case "float32": return { opcode: [0x43], popCount: 0, pushType: 0x7d };
+                case "float64": return { opcode: [0x44], popCount: 0, pushType: 0x7c };
+                default: throw new Error(`Unknown type '${type}' for const instruction`);
+            }
+        }
+
+        case "clz":      return resolvePolymorphicOp(1, "same", { 0x7f: [0x67], 0x7e: [0x79] });
+        case "eqz":      return resolvePolymorphicOp(1, 0x7f, { 0x7f: [0x45], 0x7e: [0x50] });
+        case "add":      return resolvePolymorphicOp(2, "same", { 0x7f: [0x6a], 0x7e: [0x7c], 0x7d: [0x92], 0x7c: [0xa0] });
+        case "sub":
+        case "subtract": return resolvePolymorphicOp(2, "same", { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] });
+        case "mul":      return resolvePolymorphicOp(2, "same", { 0x7f: [0x6c], 0x7e: [0x7e], 0x7d: [0x94], 0x7c: [0xa2] });
+
+        default:
+            return null;
     }
-
-    const finalOpcode = opcodes[targetType];
-    if (!finalOpcode)
-        throw new CompilationError(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
-
-    return {
-        opcode:   finalOpcode,
-        popCount: arity,
-        pushType: push === "same" ? targetType : push,
-    };
 }
