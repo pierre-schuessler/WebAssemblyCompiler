@@ -663,14 +663,21 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
         const targetType = operands[0];
         
         if (!operands.every(op => op === targetType)) throw new Error(`Type mismatch for '${inst}'`);
+
+
+        const typeMap = { 127: "int32", 126: "int64", 125: "float32", 124: "float64" };
+        const targetTypeStr = typeMap[targetType] || targetType;
         
-        const finalOpcode = opcodes[targetType];
-        if (!finalOpcode) throw new Error(`Unsupported type '${targetType}' for '${inst}'`);
+        const finalOpcode = opcodes[targetTypeStr];
+        if (!finalOpcode) throw new Error(`Unsupported type '${targetTypeStr}' for '${inst}'`);
         
+        const reverseTypeMap = { "int32": 127, "int64": 126, "float32": 125, "float64": 124 };
+        const pushVal = push === "same" ? targetType : (reverseTypeMap[push] || push);
+
         return { 
             opcode: finalOpcode, 
             popCount: arity, 
-            pushType: push === "same" ? targetType : push 
+            pushType: pushVal 
         };
     };
 
