@@ -649,128 +649,24 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
 
     if (Array.isArray(arg)) {
         const immediateOps = {
-            "call":       {
-                opcode:    [0x10],
-                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
-                popCount:  0,
-                pushType:  null,
-            },
-            "local.get":  {
-                opcode:    [0x20],
-                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
-                popCount:  0,
-                pushType:  null,
-            },
-            "local.set":  {
-                opcode:    [0x21],
-                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
-                popCount:  1,
-                pushType:  null,
-            },
-            "local.tee":  {
-                opcode:    [0x22],
-                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
-                popCount:  0,
-                pushType:  null,
-            },
-            "br":         {
-                opcode:    [0x0c],
-                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
-                popCount:  0,
-                pushType:  null,
-            },
-            "br_if":      {
-                opcode:    [0x0d],
-                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
-                popCount:  1,
-                pushType:  null,
-            },
-            "memory.grow": {
-                opcode:    [0x40],
-                encodeArg: (_)    => [0x00],
-                popCount:  1,
-                pushType:  0x7f,
-            },
-            "memory.size": {
-                opcode:    [0x3f],
-                encodeArg: (_)    => [0x00], 
-                popCount:  0,
-                pushType:  0x7f,
-            },
+            "call":        { opcode: [0x10], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 0, pushType: null },
+            "local.get":   { opcode: [0x20], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 0, pushType: null },
+            "local.set":   { opcode: [0x21], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 1, pushType: null },
+            "local.tee":   { opcode: [0x22], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 0, pushType: null },
+            "br":          { opcode: [0x0c], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 0, pushType: null },
+            "br_if":       { opcode: [0x0d], encodeArg: (args) => encodeULEB128(parseInt(args[0])), popCount: 1, pushType: null },
+            "memory.grow": { opcode: [0x40], encodeArg: (_) => [0x00], popCount: 1, pushType: 0x7f },
+            "memory.size": { opcode: [0x3f], encodeArg: (_) => [0x00], popCount: 0, pushType: 0x7f },
             
-            "i32.load":   {
-                opcode:    [0x28],
-                encodeArg: (args) => [
-                    ...encodeULEB128(parseInt(args[0] ?? 2)),
-                    ...encodeULEB128(parseInt(args[1] ?? 0)),
-                ],
-                popCount:  1,
-                pushType:  0x7f,
-            },
-            "i64.load":   {
-                opcode:    [0x29],
-                encodeArg: (args) => [
-                    ...encodeULEB128(parseInt(args[0] ?? 3)),
-                    ...encodeULEB128(parseInt(args[1] ?? 0)),
-                ],
-                popCount:  1,
-                pushType:  0x7e,
-            },
-            "f32.load":   {
-                opcode:    [0x2a],
-                encodeArg: (args) => [
-                    ...encodeULEB128(parseInt(args[0] ?? 2)),
-                    ...encodeULEB128(parseInt(args[1] ?? 0)),
-                ],
-                popCount:  1,
-                pushType:  0x7d,
-            },
-            "f64.load":   {
-                opcode:    [0x2b],
-                encodeArg: (args) => [
-                    ...encodeULEB128(parseInt(args[0] ?? 3)),
-                    ...encodeULEB128(parseInt(args[1] ?? 0)),
-                ],
-                popCount:  1,
-                pushType:  0x7c,
-            },
+            "i32.load":    { opcode: [0x28], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7f },
+            "i64.load":    { opcode: [0x29], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7e },
+            "f32.load":    { opcode: [0x2a], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7d },
+            "f64.load":    { opcode: [0x2b], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7c },
             
-            "i32.store":  {
-                opcode:    [0x36],
-                encodeArg: (args) => [
-                    ...encodeULEB128(parseInt(args[0] ?? 2)),
-                    ...encodeULEB128(parseInt(args[1] ?? 0)),
-                ],
-                popCount:  2, 
-                pushType:  null,
-            },
-            "i64.store":  {
-                opcode:    [0x37],
-                encodeArg: (args) => [
-                    ...encodeULEB128(parseInt(args[0] ?? 3)),
-                    ...encodeULEB128(parseInt(args[1] ?? 0)),
-                ],
-                popCount:  2,
-                pushType:  null,
-            },
-            "f32.store":  {
-                opcode:    [0x38],
-                encodeArg: (args) => [
-                    ...encodeULEB128(parseInt(args[0] ?? 2)),
-                    ...encodeULEB128(parseInt(args[1] ?? 0)),
-                ],
-                popCount:  2,
-                pushType:  null,
-            },
-            "f64.store":  {
-                opcode:    [0x39],
-                encodeArg: (args) => [
-                    ...encodeULEB128(parseInt(args[0] ?? 3)),
-                    ...encodeULEB128(parseInt(args[1] ?? 0)),
-                ],
-                popCount:  2,
-                pushType:  null,
-            },
+            "i32.store":   { opcode: [0x36], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null },
+            "i64.store":   { opcode: [0x37], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null },
+            "f32.store":   { opcode: [0x38], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null },
+            "f64.store":   { opcode: [0x39], encodeArg: (args) => [...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null },
         };
 
         const entry = immediateOps[inst];
