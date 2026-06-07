@@ -279,10 +279,21 @@ function handleInstruction(instructionName, binary, stacktypes, line, notFoundMe
     }
 }
 
+function handleImmediateInstruction(instructionName, immediates, binary, stacktypes, locals, line) {
+    const result = encodeWasmInstruction(instructionName, stacktypes, immediates);
+    if (!result) throw new CompilationError(
+        `Unknown immediate instruction: '${instructionName}'`,
+        "compile_executables", line
+    );
+    binary.push(...result.opcode);
+    for (let i = 0; i < (result.popCount ?? 0); i++) stacktypes.pop();
+    if (result.pushType != null) stacktypes.push(result.pushType);
+}
+
 function handleFunctionCall(element, executables, functions, binary, stacktypes, line) {
     const targetFunctionIndex = executables.indexOf(element);
     if (targetFunctionIndex !== -1) {
-        binary.push(encodeWasmInstruction("call").opcode[0], targetFunctionIndex);
+        binary.push(...encodeWasmInstruction("call", stacktypes, [targetFunctionIndex]).opcode);
         
         const targetSig = functions[targetFunctionIndex];
         for (let p = 0; p < targetSig.input.length; p++) stacktypes.pop();
@@ -325,15 +336,14 @@ function handleToken(token, isOutput, locals, binary, stacktypes, line) {
     
     if (localIndex !== -1) {
         if (isOutput) {
-            binary.push(encodeWasmInstruction("local.set").opcode[0], localIndex);
+            binary.push(...encodeWasmInstruction("local.set", stacktypes, [localIndex]).opcode);
             stacktypes.pop();
         } else {
-            binary.push(encodeWasmInstruction("local.get").opcode[0], localIndex);
+            binary.push(...encodeWasmInstruction("local.get", stacktypes, [localIndex]).opcode);
             stacktypes.push(locals[localIndex].type);
         }
         return;
     }
-
     
     if (!isOutput && handleConstant(token, binary, stacktypes, line)) {
         return;
@@ -396,7 +406,13 @@ function compile_executables(code, functions, executables) {
                         const isConstantElement = /^\((\w+)\)/.test(element);
                         const isOutput = (i === computationalElements.length - 1);
 
-                        if (!isConstantElement && element.includes(".")) {
+                        const immMatch = /^([\w.]+)\(([^)]*)\)$/.exec(element);
+                        if (immMatch) {
+                            const instrName = immMatch[1];
+                            const rawArgs   = immMatch[2].trim();
+                            const immediates      = rawArgs.length ? rawArgs.split(",").map(s => s.trim()) : [];
+                            handleImmediateInstruction(instrName, immediates, binary, stacktypes, locals, line);
+                        } else if (!isConstantElement && element.includes(".")) {
                             handleFunctionCall(element, executables, functions, binary, stacktypes, line);
                         } else {
                             element.split(",").map(v => v.trim()).forEach(token => {
@@ -631,13 +647,146 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
     };
     if (valueTypes[inst] !== undefined) return valueTypes[inst];
 
+    if (Array.isArray(arg)) {
+        const immediateOps = {
+            "call":       {
+                opcode:    [0x10],
+                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
+                popCount:  0,
+                pushType:  null,
+            },
+            "local.get":  {
+                opcode:    [0x20],
+                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
+                popCount:  0,
+                pushType:  null,
+            },
+            "local.set":  {
+                opcode:    [0x21],
+                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
+                popCount:  1,
+                pushType:  null,
+            },
+            "local.tee":  {
+                opcode:    [0x22],
+                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
+                popCount:  0,
+                pushType:  null,
+            },
+            "br":         {
+                opcode:    [0x0c],
+                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
+                popCount:  0,
+                pushType:  null,
+            },
+            "br_if":      {
+                opcode:    [0x0d],
+                encodeArg: (args) => encodeULEB128(parseInt(args[0])),
+                popCount:  1,
+                pushType:  null,
+            },
+            "memory.grow": {
+                opcode:    [0x40],
+                encodeArg: (_)    => [0x00],
+                popCount:  1,
+                pushType:  0x7f,
+            },
+            "memory.size": {
+                opcode:    [0x3f],
+                encodeArg: (_)    => [0x00], 
+                popCount:  0,
+                pushType:  0x7f,
+            },
+            
+            "i32.load":   {
+                opcode:    [0x28],
+                encodeArg: (args) => [
+                    ...encodeULEB128(parseInt(args[0] ?? 2)),
+                    ...encodeULEB128(parseInt(args[1] ?? 0)),
+                ],
+                popCount:  1,
+                pushType:  0x7f,
+            },
+            "i64.load":   {
+                opcode:    [0x29],
+                encodeArg: (args) => [
+                    ...encodeULEB128(parseInt(args[0] ?? 3)),
+                    ...encodeULEB128(parseInt(args[1] ?? 0)),
+                ],
+                popCount:  1,
+                pushType:  0x7e,
+            },
+            "f32.load":   {
+                opcode:    [0x2a],
+                encodeArg: (args) => [
+                    ...encodeULEB128(parseInt(args[0] ?? 2)),
+                    ...encodeULEB128(parseInt(args[1] ?? 0)),
+                ],
+                popCount:  1,
+                pushType:  0x7d,
+            },
+            "f64.load":   {
+                opcode:    [0x2b],
+                encodeArg: (args) => [
+                    ...encodeULEB128(parseInt(args[0] ?? 3)),
+                    ...encodeULEB128(parseInt(args[1] ?? 0)),
+                ],
+                popCount:  1,
+                pushType:  0x7c,
+            },
+            
+            "i32.store":  {
+                opcode:    [0x36],
+                encodeArg: (args) => [
+                    ...encodeULEB128(parseInt(args[0] ?? 2)),
+                    ...encodeULEB128(parseInt(args[1] ?? 0)),
+                ],
+                popCount:  2, 
+                pushType:  null,
+            },
+            "i64.store":  {
+                opcode:    [0x37],
+                encodeArg: (args) => [
+                    ...encodeULEB128(parseInt(args[0] ?? 3)),
+                    ...encodeULEB128(parseInt(args[1] ?? 0)),
+                ],
+                popCount:  2,
+                pushType:  null,
+            },
+            "f32.store":  {
+                opcode:    [0x38],
+                encodeArg: (args) => [
+                    ...encodeULEB128(parseInt(args[0] ?? 2)),
+                    ...encodeULEB128(parseInt(args[1] ?? 0)),
+                ],
+                popCount:  2,
+                pushType:  null,
+            },
+            "f64.store":  {
+                opcode:    [0x39],
+                encodeArg: (args) => [
+                    ...encodeULEB128(parseInt(args[0] ?? 3)),
+                    ...encodeULEB128(parseInt(args[1] ?? 0)),
+                ],
+                popCount:  2,
+                pushType:  null,
+            },
+        };
+
+        const entry = immediateOps[inst];
+        if (!entry) return null;
+
+        return {
+            opcode:   [...entry.opcode, ...entry.encodeArg(arg)],
+            popCount: entry.popCount,
+            pushType: entry.pushType,
+        };
+    }
+
     const simpleOps = {
-        nop:           { opcode: [0x01] },
-        "return":      { opcode: [0x0f] },
-        end:           { opcode: [0x0b] },
-        call:          { opcode: [0x10] },
-        "local.get":   { opcode: [0x20] },
-        "local.set":   { opcode: [0x21] },
+        nop:          { opcode: [0x01] },
+        "return":     { opcode: [0x0f] },
+        end:          { opcode: [0x0b] }
     };
     if (simpleOps[inst] !== undefined) return simpleOps[inst];
 
@@ -646,7 +795,7 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
             int32:   [0x41],
             int64:   [0x42],
             float32: [0x43],
-            float64: [0x44],  
+            float64: [0x44],
         };
         if (constOpcodes[arg] !== undefined) return { opcode: constOpcodes[arg], popCount: 0, pushType: valueTypes[arg].opcode[0] };
         throw new CompilationError(`Unknown type '${arg}' for const instruction`);
@@ -654,7 +803,6 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
 
     const I32 = encodeWasmInstruction("int32").opcode[0];
 
-    
     const numericOps = {
         clz:      { arity: 1, push: "same", opcodes: { 0x7f: [0x67], 0x7e: [0x79] } },
         eqz:      { arity: 1, push: I32,    opcodes: { 0x7f: [0x45], 0x7e: [0x50] } },
@@ -685,8 +833,8 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
         throw new CompilationError(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
 
     return {
-        opcode: finalOpcode,
+        opcode:   finalOpcode,
         popCount: arity,
-        pushType: push === "same" ? targetType : push
+        pushType: push === "same" ? targetType : push,
     };
 }
