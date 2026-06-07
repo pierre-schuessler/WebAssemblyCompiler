@@ -562,13 +562,14 @@ function formatBinary(functions = [], imports = [], exports = {}, executables = 
     if (executables.length) {
         binary.push(0x0a);
 
-        const bodies = executables.map((fn) => {
+        const bodies = executables.map((fn, index) => {
             if (typeof fn === 'string' || fn instanceof String)
                 throw new CompilationError(`Could not find an executable for '${fn}'`, "formatBinary");
 
-            const local_values = fn.locals.map(l => l.type);
+            const paramCount = functions[index].input.length;
+            
+            const local_values = fn.locals.slice(paramCount).map(l => l.type);
 
-            // Run-length encode locals by type
             const groups = [];
             let i = 0;
             while (i < local_values.length) {
