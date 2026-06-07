@@ -657,27 +657,20 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
     const args = Array.isArray(arg) ? arg : [arg];
 
     const resolvePolymorphicOp = (arity, push, opcodes) => {
-        if (stack.length < arity) {
-            throw new Error(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
-        }
-
+        if (stack.length < arity) throw new Error(`Stack underflow: '${inst}' requires ${arity} operand(s)`);
+        
         const operands = stack.slice(-arity);
         const targetType = operands[0];
-
-        if (!operands.every(op => op === targetType)) {
-            const typesStr = operands.map(op => `0x${op.toString(16)}`).join(", ");
-            throw new Error(`Type mismatch for '${inst}': all ${arity} operands must match. Got [${typesStr}]`);
-        }
-
+        
+        if (!operands.every(op => op === targetType)) throw new Error(`Type mismatch for '${inst}'`);
+        
         const finalOpcode = opcodes[targetType];
-        if (!finalOpcode) {
-            throw new Error(`Unsupported type 0x${targetType.toString(16)} for '${inst}'`);
-        }
-
-        return {
-            opcode: finalOpcode,
-            popCount: arity,
-            pushType: push === "same" ? targetType : push,
+        if (!finalOpcode) throw new Error(`Unsupported type '${targetType}' for '${inst}'`);
+        
+        return { 
+            opcode: finalOpcode, 
+            popCount: arity, 
+            pushType: push === "same" ? targetType : push 
         };
     };
 
@@ -699,36 +692,80 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
         case "br":        return { opcode: [0x0c, ...encodeULEB128(parseInt(args[0]))], popCount: 0, pushType: null };
         case "br_if":     return { opcode: [0x0d, ...encodeULEB128(parseInt(args[0]))], popCount: 1, pushType: null };
         
-        case "memory.grow": return { opcode: [0x40, 0x00], popCount: 1, pushType: 0x7f };
-        case "memory.size": return { opcode: [0x3f, 0x00], popCount: 0, pushType: 0x7f };
+        case "memory.grow": return { opcode: [0x40, 0x00], popCount: 1, pushType: "int32" };
+        case "memory.size": return { opcode: [0x3f, 0x00], popCount: 0, pushType: "int32" };
 
-        case "i32.load": return { opcode: [0x28, ...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7f };
-        case "i64.load": return { opcode: [0x29, ...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7e };
-        case "f32.load": return { opcode: [0x2a, ...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7d };
-        case "f64.load": return { opcode: [0x2b, ...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 1, pushType: 0x7c };
+        case "store": {
+            if (stack.length < 2) throw new Error("Stack underflow: 'store' requires [address, value]");
+            
+            const valueType = stack[stack.length - 1]; 
+            const bits = args[0] ? parseInt(args[0]) : null;
+            
+            const align = encodeULEB128(parseInt(args[1] ?? (bits ? Math.log2(bits/8) : (valueType === "int64" || valueType === "float64" ? 3 : 2))));
+            const offset = encodeULEB128(parseInt(args[2] ?? 0));
+            const memArgs = [...align, ...offset];
 
-        case "i32.store": return { opcode: [0x36, ...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null };
-        case "i64.store": return { opcode: [0x37, ...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null };
-        case "f32.store": return { opcode: [0x38, ...encodeULEB128(parseInt(args[0] ?? 2)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null };
-        case "f64.store": return { opcode: [0x39, ...encodeULEB128(parseInt(args[0] ?? 3)), ...encodeULEB128(parseInt(args[1] ?? 0))], popCount: 2, pushType: null };
+            if (valueType === "int32") {
+                if (bits === 8)  return { opcode: [0x3a, ...memArgs], popCount: 2, pushType: null };
+                if (bits === 16) return { opcode: [0x3b, ...memArgs], popCount: 2, pushType: null };
+                if (!bits || bits === 32) return { opcode: [0x36, ...memArgs], popCount: 2, pushType: null };
+            } else if (valueType === "int64") {
+                if (bits === 8)  return { opcode: [0x3c, ...memArgs], popCount: 2, pushType: null };
+                if (bits === 16) return { opcode: [0x3d, ...memArgs], popCount: 2, pushType: null };
+                if (bits === 32) return { opcode: [0x3e, ...memArgs], popCount: 2, pushType: null };
+                if (!bits || bits === 64) return { opcode: [0x37, ...memArgs], popCount: 2, pushType: null };
+            } else if (valueType === "float32" && (!bits || bits === 32)) {
+                return { opcode: [0x38, ...memArgs], popCount: 2, pushType: null };
+            } else if (valueType === "float64" && (!bits || bits === 64)) {
+                return { opcode: [0x39, ...memArgs], popCount: 2, pushType: null };
+            }
+            throw new Error(`Invalid bit width ${bits} or type '${valueType}' for store`);
+        }
+
+        case "load": {
+            if (stack.length < 1) throw new Error("Stack underflow: 'load' requires [address]");
+            
+            const bits = args[0] ? parseInt(args[0]) : null;
+            const targetTypeStr = args[1] || "int32";
+            
+            const align = encodeULEB128(parseInt(args[2] ?? (bits ? Math.log2(bits/8) : (targetTypeStr === "int64" || targetTypeStr === "float64" ? 3 : 2))));
+            const offset = encodeULEB128(parseInt(args[3] ?? 0));
+            const memArgs = [...align, ...offset];
+
+            if (targetTypeStr === "int32") {
+                if (bits === 8)  return { opcode: [0x2d, ...memArgs], popCount: 1, pushType: "int32" };
+                if (bits === 16) return { opcode: [0x2f, ...memArgs], popCount: 1, pushType: "int32" };
+                if (!bits || bits === 32) return { opcode: [0x28, ...memArgs], popCount: 1, pushType: "int32" };
+            } else if (targetTypeStr === "int64") {
+                if (bits === 8)  return { opcode: [0x31, ...memArgs], popCount: 1, pushType: "int64" };
+                if (bits === 16) return { opcode: [0x33, ...memArgs], popCount: 1, pushType: "int64" };
+                if (bits === 32) return { opcode: [0x35, ...memArgs], popCount: 1, pushType: "int64" };
+                if (!bits || bits === 64) return { opcode: [0x29, ...memArgs], popCount: 1, pushType: "int64" };
+            } else if (targetTypeStr === "float32" && (!bits || bits === 32)) {
+                return { opcode: [0x2a, ...memArgs], popCount: 1, pushType: "float32" };
+            } else if (targetTypeStr === "float64" && (!bits || bits === 64)) {
+                return { opcode: [0x2b, ...memArgs], popCount: 1, pushType: "float64" };
+            }
+            throw new Error(`Invalid bit width ${bits} for ${targetTypeStr} load`);
+        }
 
         case "const": {
             const type = args[0];
             switch (type) {
-                case "int32":   return { opcode: [0x41], popCount: 0, pushType: 0x7f };
-                case "int64":   return { opcode: [0x42], popCount: 0, pushType: 0x7e };
-                case "float32": return { opcode: [0x43], popCount: 0, pushType: 0x7d };
-                case "float64": return { opcode: [0x44], popCount: 0, pushType: 0x7c };
-                default: throw new Error(`Unknown type '${type}' for const instruction`);
+                case "int32":   return { opcode: [0x41], popCount: 0, pushType: "int32" };
+                case "int64":   return { opcode: [0x42], popCount: 0, pushType: "int64" };
+                case "float32": return { opcode: [0x43], popCount: 0, pushType: "float32" };
+                case "float64": return { opcode: [0x44], popCount: 0, pushType: "float64" };
+                default: throw new Error(`Unknown type '${type}' for const`);
             }
         }
 
-        case "clz":      return resolvePolymorphicOp(1, "same", { 0x7f: [0x67], 0x7e: [0x79] });
-        case "eqz":      return resolvePolymorphicOp(1, 0x7f, { 0x7f: [0x45], 0x7e: [0x50] });
-        case "add":      return resolvePolymorphicOp(2, "same", { 0x7f: [0x6a], 0x7e: [0x7c], 0x7d: [0x92], 0x7c: [0xa0] });
+        case "clz":      return resolvePolymorphicOp(1, "same", { "int32": [0x67], "int64": [0x79] });
+        case "eqz":      return resolvePolymorphicOp(1, "int32", { "int32": [0x45], "int64": [0x50] });
+        case "add":      return resolvePolymorphicOp(2, "same", { "int32": [0x6a], "int64": [0x7c], "float32": [0x92], "float64": [0xa0] });
         case "sub":
-        case "subtract": return resolvePolymorphicOp(2, "same", { 0x7f: [0x6b], 0x7e: [0x7d], 0x7d: [0x93], 0x7c: [0xa1] });
-        case "mul":      return resolvePolymorphicOp(2, "same", { 0x7f: [0x6c], 0x7e: [0x7e], 0x7d: [0x94], 0x7c: [0xa2] });
+        case "subtract": return resolvePolymorphicOp(2, "same", { "int32": [0x6b], "int64": [0x7d], "float32": [0x93], "float64": [0xa1] });
+        case "mul":      return resolvePolymorphicOp(2, "same", { "int32": [0x6c], "int64": [0x7e], "float32": [0x94], "float64": [0xa2] });
 
         default:
             return null;
