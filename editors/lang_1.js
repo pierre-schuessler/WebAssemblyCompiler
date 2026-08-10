@@ -322,7 +322,7 @@ export function initEditor(textarea, wrapEl) {
     color:        "transparent",   // text is invisible; only spans show colour
     background:   "transparent",
     pointerEvents: "none",
-    whiteSpace:   "pre-wrap",
+    whiteSpace:   "pre",
     wordBreak:    "break-all",
     overflowX:    "hidden",
     overflowY:    "hidden",
@@ -343,6 +343,8 @@ export function initEditor(textarea, wrapEl) {
     background: "transparent",
     caretColor: "#ffffff",
     color:      "transparent",
+    whiteSpace: "pre",
+    wordWrap:   "normal"
   });
 
   function syncScroll() {
