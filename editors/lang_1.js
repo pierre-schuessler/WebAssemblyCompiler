@@ -1,19 +1,3 @@
-/**
- * editor.js — Syntax highlighting + autocomplete for the WASM compiler.
- *
- * Usage:
- *   import { initEditor } from "./editor.js";
- *   const editor = initEditor(
- *     document.getElementById("code"),
- *     document.getElementById("editorWrap")
- *   );
- *
- * The editor object exposes:
- *   editor.refresh()   — force re-highlight (call after programmatic value changes)
- */
-
-// ─── Token definitions ────────────────────────────────────────────────────────
-
 const KEYWORDS = new Set([
   "export", "import", "global", "memory", "data", "local", "return", "mut", "#include",
 ]);
@@ -43,7 +27,7 @@ const INSTRUCTIONS = new Set([
   "f64.convert_s_i32", "f64.convert_u_i32", "f64.convert_s_i64", "f64.convert_u_i64", "f64.promote", "f64.reinterpret",
 ]);
 
-// All completions available statically (dynamic user names are added at query time)
+
 const STATIC_COMPLETIONS = [
   ...KEYWORDS,
   ...TYPES,
@@ -51,12 +35,9 @@ const STATIC_COMPLETIONS = [
 ];
 
 
-// ─── Tokeniser ────────────────────────────────────────────────────────────────
 
-/**
- * Tokenises a single line into [{text, kind}] tokens.
- * Kinds: keyword | type | instr | number | string | comment | punct | ident
- */
+
+
 function tokenizeLine(line) {
   const tokens = [];
   let i = 0;
@@ -64,27 +45,27 @@ function tokenizeLine(line) {
   while (i < line.length) {
     const ch = line[i];
 
-    // Comment — rest of line
+    
     if (ch === "/" && line[i + 1] === "/") {
       tokens.push({ text: line.slice(i), kind: "comment" });
       break;
     }
 
-    // Double-quoted string / numeric literal (e.g. "42", 64"3.14")
+    
     if (ch === '"' || (ch === '6' && line[i + 1] === '4' && line[i + 2] === '"')) {
       const start = i;
-      if (line[i] !== '"') i += 2;   // skip 64 prefix
-      i++;                            // skip opening "
+      if (line[i] !== '"') i += 2;   
+      i++;                            
       while (i < line.length && line[i] !== '"') {
-        if (line[i] === '\\') i++;   // skip escaped char
+        if (line[i] === '\\') i++;   
         i++;
       }
-      i++;                            // skip closing "
+      i++;                            
       tokens.push({ text: line.slice(start, i), kind: "string" });
       continue;
     }
 
-    // Single-quoted string literal  'hello\nworld'
+    
     if (ch === "'") {
       const start = i++;
       while (i < line.length && line[i] !== "'") {
@@ -96,7 +77,7 @@ function tokenizeLine(line) {
       continue;
     }
 
-    // #include
+    
     if (ch === "#") {
       const end = line.indexOf(" ", i);
       const word = end === -1 ? line.slice(i) : line.slice(i, end);
@@ -105,7 +86,7 @@ function tokenizeLine(line) {
       continue;
     }
 
-    // Whitespace — pass through unstyled
+    
     if (ch === " " || ch === "\t") {
       let j = i;
       while (j < line.length && (line[j] === " " || line[j] === "\t")) j++;
@@ -114,7 +95,7 @@ function tokenizeLine(line) {
       continue;
     }
 
-    // Number  (starts with digit, or minus followed by digit at word boundary)
+    
     const prevIsWordChar = i > 0 && /[\w.]/.test(line[i - 1]);
     if (/[0-9]/.test(ch) || (ch === "-" && !prevIsWordChar && /[0-9]/.test(line[i + 1]))) {
       let j = i;
@@ -125,9 +106,9 @@ function tokenizeLine(line) {
       continue;
     }
 
-    // Punctuation
+    
     if ("(){}=><,".includes(ch)) {
-      // Treat => as a single token
+      
       if (ch === "=" && line[i + 1] === ">") {
         tokens.push({ text: "=>", kind: "punct" });
         i += 2;
@@ -138,7 +119,7 @@ function tokenizeLine(line) {
       continue;
     }
 
-    // Word — may contain dots (e.g. global.get, f32.convert_s_i32)
+    
     if (/[a-zA-Z_$]/.test(ch)) {
       let j = i;
       while (j < line.length && /[a-zA-Z0-9_.$/]/.test(line[j])) j++;
@@ -154,7 +135,7 @@ function tokenizeLine(line) {
       continue;
     }
 
-    // Fallback — emit as-is
+    
     tokens.push({ text: ch, kind: "other" });
     i++;
   }
@@ -163,9 +144,9 @@ function tokenizeLine(line) {
 }
 
 
-// ─── Highlighting ─────────────────────────────────────────────────────────────
 
-// Color palette uses CSS custom properties so the host page can override them.
+
+
 const KIND_COLOR = {
   keyword: "#c792ea",
   type:    "#82aaff",
@@ -197,9 +178,6 @@ function highlightCode(code) {
 }
 
 
-// ─── Autocomplete ─────────────────────────────────────────────────────────────
-
-/** Extract the identifier fragment immediately before the cursor. */
 function getWordAtCursor(textarea) {
   const pos = textarea.selectionStart;
   const text = textarea.value;
@@ -208,31 +186,26 @@ function getWordAtCursor(textarea) {
   return { word: text.slice(start, pos), start, end: pos };
 }
 
-/** Scan the code for user-defined names (exported fns, globals, local vars). */
 function extractUserNames(code) {
   const names = new Set();
   for (const raw of code.split("\n")) {
     const t = raw.trim();
 
-    // export / import function names
+    
     const fnM = t.match(/^(?:export|import)\s+(\w+)/);
     if (fnM) names.add(fnM[1]);
 
-    // global <type> [mut] <name>
+    
     const gM = t.match(/^global\s+(?:mut\s+)?(?:i32|i64|f32|f64)\s+(\w+)/);
     if (gM) names.add(gM[1]);
 
-    // local variable declarations or assignments  name = ...
+    
     const lM = t.match(/^(?:\w+\s+)?(\w+)\s*=/);
     if (lM && !KEYWORDS.has(lM[1]) && !TYPES.has(lM[1])) names.add(lM[1]);
   }
   return [...names];
 }
 
-/**
- * Return up to `limit` completions that start with `word` (case-sensitive).
- * User-defined names are merged with the static list and deduplicated.
- */
 function getCandidates(word, code, limit = 12) {
   if (!word) return [];
   const userNames = extractUserNames(code);
@@ -243,12 +216,6 @@ function getCandidates(word, code, limit = 12) {
 }
 
 
-// ─── Cursor pixel-position helper ────────────────────────────────────────────
-
-/**
- * Returns an {left, bottom} rect (viewport-relative) for the textarea cursor.
- * Uses a hidden mirror div that replicates the textarea's layout.
- */
 function getCursorRect(textarea) {
   const style = getComputedStyle(textarea);
   const mirror = document.createElement("div");
@@ -272,13 +239,13 @@ function getCursorRect(textarea) {
 
   document.body.appendChild(mirror);
 
-  // Text before cursor
+  
   const before = textarea.value.slice(0, textarea.selectionStart);
   mirror.textContent = before;
 
-  // Sentinel span at cursor
+  
   const sentinel = document.createElement("span");
-  sentinel.textContent = "\u200b"; // zero-width space
+  sentinel.textContent = "\u200b"; 
   mirror.appendChild(sentinel);
 
   const taRect  = textarea.getBoundingClientRect();
@@ -298,18 +265,9 @@ function getCursorRect(textarea) {
 }
 
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/**
- * Initialise the editor enhancements on an existing <textarea>.
- *
- * @param {HTMLTextAreaElement} textarea  The code textarea (id="code").
- * @param {HTMLElement}         wrapEl    Its scroll-wrapper (id="editorWrap").
- * @returns {{ refresh: () => void }}
- */
 export function initEditor(textarea, wrapEl) {
 
-  // ── 1. Highlight overlay ───────────────────────────────────────────────────
+  
 
   const overlay = document.createElement("pre");
   overlay.setAttribute("aria-hidden", "true");
@@ -319,7 +277,7 @@ export function initEditor(textarea, wrapEl) {
     margin:       "0",
     padding:      getComputedStyle(textarea).padding,
     font:         getComputedStyle(textarea).font,
-    color:        "transparent",   // text is invisible; only spans show colour
+    color:        "transparent",   
     background:   "transparent",
     pointerEvents: "none",
     whiteSpace:   "pre",
@@ -332,11 +290,11 @@ export function initEditor(textarea, wrapEl) {
     tabSize:      getComputedStyle(textarea).tabSize || "4",
   });
 
-  // The wrapper must be the scroll container with overflow:hidden/auto
+  
   wrapEl.style.position = "relative";
   wrapEl.insertBefore(overlay, textarea);
 
-  // Make the textarea sit above the overlay, with transparent background
+  
   Object.assign(textarea.style, {
     position:   "relative",
     zIndex:     "1",
@@ -360,16 +318,16 @@ export function initEditor(textarea, wrapEl) {
 
   textarea.addEventListener("input",  refresh);
   textarea.addEventListener("scroll", syncScroll);
-  // Also sync on external scroll (e.g. the editorWrap scrollbar)
+  
   wrapEl.addEventListener("scroll", () => {
     textarea.scrollTop  = wrapEl.scrollTop;
     overlay.scrollTop   = wrapEl.scrollTop;
   });
 
-  refresh(); // initial paint
+  refresh(); 
 
 
-  // ── 2. Autocomplete dropdown ───────────────────────────────────────────────
+  
 
   const dropdown = document.createElement("div");
   dropdown.id = "acDropdown";
@@ -399,7 +357,7 @@ export function initEditor(textarea, wrapEl) {
 
     dropdown.innerHTML = candidates
       .map((c, i) => {
-        // Figure out which colour to give the item text
+        
         let color = KIND_COLOR.ident ?? "#cdd6f4";
         if (KEYWORDS.has(c))     color = KIND_COLOR.keyword;
         else if (TYPES.has(c))   color = KIND_COLOR.type;
@@ -452,7 +410,7 @@ export function initEditor(textarea, wrapEl) {
     textarea.selectionStart = textarea.selectionEnd = cur;
     hideDropdown();
     refresh();
-    // Let host code react (line number update, minimap, etc.)
+    
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
@@ -467,16 +425,16 @@ export function initEditor(textarea, wrapEl) {
     renderDropdown(candidates, rect);
   }
 
-  // Show suggestions as the user types
+  
   textarea.addEventListener("input", triggerAutocomplete);
 
-  // Hide on click-away
+  
   document.addEventListener("mousedown", (e) => {
     if (!dropdown.contains(e.target) && e.target !== textarea) hideDropdown();
   });
   textarea.addEventListener("click", hideDropdown);
 
-  // Keyboard navigation inside the dropdown
+  
   textarea.addEventListener("keydown", (e) => {
     if (dropdown.style.display === "none") return;
 
@@ -499,6 +457,6 @@ export function initEditor(textarea, wrapEl) {
   });
 
 
-  // ── 3. Public surface ──────────────────────────────────────────────────────
+  
   return { refresh };
 }

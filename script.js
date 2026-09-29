@@ -7,6 +7,7 @@ const COMPILER_SOURCES = [
 
 const EDITOR_SOURCES = [
   { id: "lang_1",  label: "Language v1", path: "./editors/lang_1.js" },
+  { id: "lang_2", label:"Language v2", path: "./editors/lang_2.js"}
 ];
 
 // ─── Active source state ─────────────────────────────────────────────────────
