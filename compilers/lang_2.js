@@ -416,26 +416,49 @@ function compile_executables(code, functions, executables) {
                 if (line.startsWith("create ")) {
                     handleVariableCreation(line, executable, fullFunctionName);
                 } else {
-                    const computationalElements = line.split("=>").map(el => el.trim());
+                    const trimmedLine = line.trim();
+                    const endsWithArrow = trimmedLine.endsWith("=>");
+                    
+                    const computationalElements = trimmedLine.split("=>").map(el => el.trim());
+                    
+                    if (endsWithArrow) {
+                        computationalElements.pop();
+                    }
 
                     for (let i = 0; i < computationalElements.length; i++) {
                         const element = computationalElements[i];
+                    
+                        const isOutput = !endsWithArrow && (i === computationalElements.length - 1);
+                        
                         const isConstantElement = /^\((\w+)\)/.test(element);
-                        const isOutput = (i === computationalElements.length - 1);
-
                         const immMatch = /^([\w.]+)\(([^)]*)\)$/.exec(element);
+                        
                         if (immMatch) {
                             const instrName = immMatch[1];
                             const rawArgs   = immMatch[2].trim();
-                            const immediates      = rawArgs.length ? rawArgs.split(",").map(s => s.trim()) : [];
+                            const immediates = rawArgs.length ? rawArgs.split(",").map(s => s.trim()) : [];
                             handleImmediateInstruction(instrName, immediates, binary, stacktypes, locals, line);
                         } else if (!isConstantElement && element.includes(".")) {
                             handleFunctionCall(element, executables, functions, binary, stacktypes, line);
                         } else {
                             element.split(",").map(v => v.trim()).forEach(token => {
-                                handleToken(token, isOutput, locals, binary, stacktypes, line);
+                                if (token) {
+                                    handleToken(token, isOutput, locals, binary, stacktypes, line);
+                                }
                             });
                         }
+                    }
+
+                    const lastElement = computationalElements[computationalElements.length - 1];
+                    const lastToken = lastElement ? lastElement.split(",").pop().trim() : "";
+                    const isReturn = (lastToken === "return");
+
+                    if (!endsWithArrow && !isReturn && stacktypes.length > 0) {
+                        throw new CompilationError(
+                            "Unconsumed items left on the stack. Append '=>' to the end of the line if you intend to carry them forward.",
+                            "compile_executables", 
+                            line
+                        );
                     }
                 }
             }
