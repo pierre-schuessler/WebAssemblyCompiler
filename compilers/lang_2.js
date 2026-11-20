@@ -32,7 +32,8 @@ export function compile(code, libs = {}) {
 
     compile_imports(import_code, imports);
     memory = compile_declaration(declaration_code, functions, exports, imports.length, executables, memory);
-    compile_executables(executable_code, functions, executables);
+    
+    compile_executables(executable_code, functions, executables, imports);
 
     const exportsForBinary = {};
     const meta = {};
@@ -118,7 +119,8 @@ function compile_imports(code, imports) {
 
         const [definitionPart, outputPart] = line.split("=>").map(s => s.trim());
         const [pathPart, inputPart]        = definitionPart.split(":").map(s => s.trim());
-        const [module, name]               = pathPart.split(".");
+        
+        const [module, name]               = pathPart.split(".").map(s => s.trim());
 
         const extractTypes = (typeString) => {
             if (!typeString) return [];
@@ -254,18 +256,6 @@ function parseFunctionSignature(line, serviceName, functions, executables) {
 }
 
 function handleVariableCreation(line, executable, fullFunctionName) {
-    const remainder    = line.slice(7).trimStart();
-    const nameEndMatch = remainder.match(/[\s(]/);
-    const nameEndIndex = nameEndMatch ? nameEndMatch.index : remainder.length;
-    const name         = remainder.slice(0, nameEndIndex);
-
-    if (executable.locals.some(l => l.name === name)) {
-        throw new CompilationError(
-            `Local variable '${name}' was already defined in function '${fullFunctionName}'`,
-            "compile_executables", line
-        );
-    }
-
     const typeStart = line.indexOf("(");
     const typeEnd   = line.indexOf(")", typeStart);
 
@@ -278,6 +268,22 @@ function handleVariableCreation(line, executable, fullFunctionName) {
 
     const rawType = line.slice(typeStart + 1, typeEnd).trim();
     const type    = encodeWasmInstruction(rawType).opcode[0];
+
+    const name = line.slice(typeEnd + 1).trim();
+
+    if (!name) {
+        throw new CompilationError(
+            "Missing variable name after type declaration", 
+            "compile_executables", line
+        );
+    }
+
+    if (executable.locals.some(l => l.name === name)) {
+        throw new CompilationError(
+            `Local variable '${name}' was already defined in function '${fullFunctionName}'`,
+            "compile_executables", line
+        );
+    }
 
     executable.locals.push({ name, type });
 }
@@ -307,12 +313,26 @@ function handleImmediateInstruction(instructionName, immediates, binary, stackty
     if (result.pushType != null) stacktypes.push(result.pushType);
 }
 
-function handleFunctionCall(element, executables, functions, binary, stacktypes, line) {
-    const targetFunctionIndex = executables.indexOf(element);
-    if (targetFunctionIndex !== -1) {
-        binary.push(...encodeWasmInstruction("call", stacktypes, [targetFunctionIndex]).opcode);
+
+function handleFunctionCall(rawElement, executableNames, functions, imports, binary, stacktypes, line) {
+    const element = rawElement.trim();
+    
+    let targetIndex = imports.findIndex(imp => imp.name === element || `${imp.module}.${imp.name}` === element);
+    let targetSig = null;
+
+    if (targetIndex !== -1) {
+        targetSig = imports[targetIndex];
+    } else {
+        const internalIndex = executableNames.indexOf(element);
+        if (internalIndex !== -1) {
+            targetIndex = imports.length + internalIndex; 
+            targetSig = functions[internalIndex];
+        }
+    }
+
+    if (targetIndex !== -1 && targetSig) {
+        binary.push(...encodeWasmInstruction("call", stacktypes, [targetIndex]).opcode);
         
-        const targetSig = functions[targetFunctionIndex];
         for (let p = 0; p < targetSig.input.length; p++) stacktypes.pop();
         for (let p = 0; p < targetSig.output.length; p++) stacktypes.push(targetSig.output[p]);
     } else {
@@ -371,8 +391,10 @@ function handleToken(token, isOutput, locals, binary, stacktypes, line) {
 }
 
 
-function compile_executables(code, functions, executables) {
+function compile_executables(code, functions, executables, imports) {
     if (!code.trim()) return;
+
+    const executableNames = [...executables];
 
     let serviceName;
     let functionIndex;
@@ -392,7 +414,7 @@ function compile_executables(code, functions, executables) {
             serviceName = line.substring(1).trim();
 
         } else if (line.startsWith("internal ") || line.startsWith("endpoint ")) {
-            const parsedInfo = parseFunctionSignature(line, serviceName, functions, executables);
+            const parsedInfo = parseFunctionSignature(line, serviceName, functions, executableNames);
             
             functionIndex    = parsedInfo.functionIndex;
             fullFunctionName = parsedInfo.key;
@@ -420,26 +442,28 @@ function compile_executables(code, functions, executables) {
                     const endsWithArrow = trimmedLine.endsWith("=>");
                     
                     const computationalElements = trimmedLine.split("=>").map(el => el.trim());
-                    
-                    if (endsWithArrow) {
-                        computationalElements.pop();
-                    }
+                    if (endsWithArrow) computationalElements.pop();
 
                     for (let i = 0; i < computationalElements.length; i++) {
                         const element = computationalElements[i];
-                    
                         const isOutput = !endsWithArrow && (i === computationalElements.length - 1);
                         
                         const isConstantElement = /^\((\w+)\)/.test(element);
                         const immMatch = /^([\w.]+)\(([^)]*)\)$/.exec(element);
                         
+                        const isFunctionCall = !isConstantElement && (
+                            element.includes(".") || 
+                            executableNames.includes(element) || // FIX: check against safe names
+                            imports.some(imp => imp.name === element || `${imp.module}.${imp.name}` === element)
+                        );
+
                         if (immMatch) {
                             const instrName = immMatch[1];
                             const rawArgs   = immMatch[2].trim();
                             const immediates = rawArgs.length ? rawArgs.split(",").map(s => s.trim()) : [];
                             handleImmediateInstruction(instrName, immediates, binary, stacktypes, locals, line);
-                        } else if (!isConstantElement && element.includes(".")) {
-                            handleFunctionCall(element, executables, functions, binary, stacktypes, line);
+                        } else if (isFunctionCall) {
+                            handleFunctionCall(element, executableNames, functions, imports, binary, stacktypes, line);
                         } else {
                             element.split(",").map(v => v.trim()).forEach(token => {
                                 if (token) {
@@ -465,7 +489,6 @@ function compile_executables(code, functions, executables) {
         }
     });
 }
-
 /*
 FormatBinary arguments
 functions:   Array of function signatures defined in this module.
@@ -797,6 +820,66 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
         case "sub":
         case "subtract": return resolvePolymorphicOp(2, "same", { "int32": [0x6b], "int64": [0x7d], "float32": [0x93], "float64": [0xa1] });
         case "mul":      return resolvePolymorphicOp(2, "same", { "int32": [0x6c], "int64": [0x7e], "float32": [0x94], "float64": [0xa2] });
+
+        case "if":      return { opcode: [0x04, 0x40], popCount: 1, pushType: null };
+        case "else":    return { opcode: [0x05], popCount: 0, pushType: null };
+
+        // Comparisons (Takes 2 values, returns 1 int32 boolean)
+        case "eq":   return resolvePolymorphicOp(2, "int32", { "int32": [0x46], "int64": [0x51], "float32": [0x5b], "float64": [0x61] });
+        case "ne":   return resolvePolymorphicOp(2, "int32", { "int32": [0x47], "int64": [0x52], "float32": [0x5c], "float64": [0x62] });
+        case "lt_s": return resolvePolymorphicOp(2, "int32", { "int32": [0x48], "int64": [0x53] });
+        case "lt_u": return resolvePolymorphicOp(2, "int32", { "int32": [0x49], "int64": [0x54] });
+        case "gt_s": return resolvePolymorphicOp(2, "int32", { "int32": [0x4a], "int64": [0x55] });
+        case "gt_u": return resolvePolymorphicOp(2, "int32", { "int32": [0x4b], "int64": [0x56] });
+        case "le_s": return resolvePolymorphicOp(2, "int32", { "int32": [0x4c], "int64": [0x57] });
+        case "le_u": return resolvePolymorphicOp(2, "int32", { "int32": [0x4d], "int64": [0x58] });
+        case "ge_s": return resolvePolymorphicOp(2, "int32", { "int32": [0x4e], "int64": [0x59] });
+        case "ge_u": return resolvePolymorphicOp(2, "int32", { "int32": [0x4f], "int64": [0x5a] });
+        
+        // Float-specific comparisons
+        case "lt":   return resolvePolymorphicOp(2, "int32", { "float32": [0x5d], "float64": [0x63] });
+        case "gt":   return resolvePolymorphicOp(2, "int32", { "float32": [0x5e], "float64": [0x64] });
+        case "le":   return resolvePolymorphicOp(2, "int32", { "float32": [0x5f], "float64": [0x65] });
+        case "ge":   return resolvePolymorphicOp(2, "int32", { "float32": [0x60], "float64": [0x66] });
+
+        // Integer-only Math & Bitwise (Takes 2 values, returns same type)
+        case "div_s": return resolvePolymorphicOp(2, "same", { "int32": [0x6d], "int64": [0x7f] });
+        case "div_u": return resolvePolymorphicOp(2, "same", { "int32": [0x6e], "int64": [0x80] });
+        case "rem_s": return resolvePolymorphicOp(2, "same", { "int32": [0x6f], "int64": [0x81] });
+        case "rem_u": return resolvePolymorphicOp(2, "same", { "int32": [0x70], "int64": [0x82] });
+        case "and":   return resolvePolymorphicOp(2, "same", { "int32": [0x71], "int64": [0x83] });
+        case "or":    return resolvePolymorphicOp(2, "same", { "int32": [0x72], "int64": [0x84] });
+        case "xor":   return resolvePolymorphicOp(2, "same", { "int32": [0x73], "int64": [0x85] });
+        case "shl":   return resolvePolymorphicOp(2, "same", { "int32": [0x74], "int64": [0x86] });
+        case "shr_s": return resolvePolymorphicOp(2, "same", { "int32": [0x75], "int64": [0x87] });
+        case "shr_u": return resolvePolymorphicOp(2, "same", { "int32": [0x76], "int64": [0x88] });
+        case "rotl":  return resolvePolymorphicOp(2, "same", { "int32": [0x77], "int64": [0x89] });
+        case "rotr":  return resolvePolymorphicOp(2, "same", { "int32": [0x78], "int64": [0x8a] });
+        
+        // Integer unary operations (Takes 1 value, returns same type)
+        case "ctz":   return resolvePolymorphicOp(1, "same", { "int32": [0x68], "int64": [0x7a] });
+        case "popcnt":return resolvePolymorphicOp(1, "same", { "int32": [0x69], "int64": [0x7b] });
+
+        // Float-only Math (Takes 1 or 2 values, returns same type)
+        case "div":      return resolvePolymorphicOp(2, "same", { "float32": [0x95], "float64": [0xa3] });
+        case "abs":      return resolvePolymorphicOp(1, "same", { "float32": [0x8b], "float64": [0x99] });
+        case "neg":      return resolvePolymorphicOp(1, "same", { "float32": [0x8c], "float64": [0x9a] });
+        case "ceil":     return resolvePolymorphicOp(1, "same", { "float32": [0x8d], "float64": [0x9b] });
+        case "floor":    return resolvePolymorphicOp(1, "same", { "float32": [0x8e], "float64": [0x9c] });
+        case "trunc":    return resolvePolymorphicOp(1, "same", { "float32": [0x8f], "float64": [0x9d] });
+        case "nearest":  return resolvePolymorphicOp(1, "same", { "float32": [0x90], "float64": [0x9e] });
+        case "sqrt":     return resolvePolymorphicOp(1, "same", { "float32": [0x91], "float64": [0x9f] });
+        case "min":      return resolvePolymorphicOp(2, "same", { "float32": [0x96], "float64": [0xa4] });
+        case "max":      return resolvePolymorphicOp(2, "same", { "float32": [0x97], "float64": [0xa5] });
+        case "copysign": return resolvePolymorphicOp(2, "same", { "float32": [0x98], "float64": [0xa6] });
+
+        // Control Flow 
+        case "block": return { opcode: [0x02, 0x40], popCount: 0, pushType: null };
+        case "loop":  return { opcode: [0x03, 0x40], popCount: 0, pushType: null };
+
+        // Globals (Requires immediates just like local.get/set)
+        case "global.get": return { opcode: [0x23, ...encodeULEB128(parseInt(args[0]))], popCount: 0, pushType: null }; 
+        case "global.set": return { opcode: [0x24, ...encodeULEB128(parseInt(args[0]))], popCount: 1, pushType: null };
 
         default:
             return null;
