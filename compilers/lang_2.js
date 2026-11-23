@@ -31,7 +31,7 @@ export function compile(code, libs = {}) {
     let executable_code = merge_executables(bodies_code, macros_code);
 
     compile_imports(import_code, imports);
-    memory = compile_declaration(declaration_code, functions, exports, imports.length, executables, memory);
+    memory = compile_declaration(declaration_code, functions, exports, imports.length, executables, dataSegs);
     
     compile_executables(executable_code, functions, executables, imports);
 
@@ -137,8 +137,45 @@ function compile_imports(code, imports) {
     });
 }
 
-function compile_declaration(code, functions, exports, amountOfImports, executables) {
-    if (!code.trim()) return;
+function parseDataSegment(spec, rawLine) {
+    // Matches: <offset> "<string>"  OR  <offset> [<byte>, <byte>, ...]
+    const match = /^(\d+)\s+(?:"((?:[^"\\]|\\.)*)"|\[([^\]]*)\])$/.exec(spec);
+    if (!match) {
+        throw new CompilationError(
+            'Invalid data syntax. Expected: data: <offset> "string" or data: <offset> [b1, b2, ...]',
+            "compile_declaration",
+            rawLine
+        );
+    }
+
+    const offset = Number(match[1]);
+    let bytes = [];
+
+    if (match[2] !== undefined) {
+        // Unescape common sequences (\n, \r, \t, \0, \\, \") and encode as UTF-8
+        const unescaped = match[2].replace(/\\([nrt0\\"'])/g, (_, esc) => {
+            switch (esc) {
+                case "n": return "\n";
+                case "r": return "\r";
+                case "t": return "\t";
+                case "0": return "\0";
+                default:  return esc;
+            }
+        });
+        bytes = [...new TextEncoder().encode(unescaped)];
+    } else if (match[3] !== undefined) {
+        bytes = match[3]
+            .split(",")
+            .map(s => s.trim())
+            .filter(Boolean)
+            .map(n => Number(n) & 0xff);
+    }
+
+    return { offset, bytes };
+}
+
+function compile_declaration(code, functions, exports, amountOfImports, executables, dataSegs = []) {
+    if (!code.trim()) return null;
 
     let service_name;
     const lines = code.split("\n");
@@ -153,19 +190,21 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
             return;
         }
 
-        if (service_name == "memory"){
-            if(line.startsWith("min: ")) {
-                memory.min = Number(line.substring(5))
+        if (service_name == "memory") {
+            if (line.startsWith("min: ")) {
+                memory.min = Number(line.substring(5));
             }
-            if(line.startsWith("max: ")) {
-                memory.max = Number(line.substring(5))
+            if (line.startsWith("max: ")) {
+                memory.max = Number(line.substring(5));
             }
-            if(line.startsWith("open: ")) {
-                memory.open = ["true", "yes", "y"].includes(line.substring(6).toLowerCase())
+            if (line.startsWith("open: ")) {
+                memory.open = ["true", "yes", "y"].includes(line.substring(6).toLowerCase());
+            }
+            if (line.startsWith("data: ")) {
+                dataSegs.push(parseDataSegment(line.substring(6).trim(), line));
             }
             return;
         }
-        
 
         if (!service_name) throw new CompilationError(
             "The declaration part must start with the opening of a new service via the @ syntax",
@@ -183,12 +222,6 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
         const [definitionPart, outputPart] = clean_line.split("=>").map(s => s.trim());
         const [name, inputPart]            = definitionPart.split(":").map(s => s.trim());
 
-        const extractTypes = (typeString) => {
-            if (!typeString) return [];
-            const matches = [...typeString.matchAll(/\(([^)]+)\)/g)];
-            return matches.map(match => encodeWasmInstruction(match[1]).opcode[0]);
-        };
-
         const signature = {
             input:  extractTypes(inputPart),
             output: extractTypes(outputPart)
@@ -205,6 +238,14 @@ function compile_declaration(code, functions, exports, amountOfImports, executab
             });
         }
     });
+
+    if (dataSegs.length > 0 && memory?.min == null) {
+        throw new CompilationError(
+            "Cannot define memory data segments without setting 'min:' in @memory.",
+            "compile_declaration"
+        );
+    }
+
     return memory;
 }
 
