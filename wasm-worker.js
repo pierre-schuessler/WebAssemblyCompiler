@@ -39,10 +39,13 @@ self.stdout = (text) => self.postMessage({ type: "stdout", text: String(text) })
 // ─── blocking stdin ──────────────────────────────────────────────────────────
 
 function blockForInput() {
-  flushOut();                                  // flush pending output first
-  Atomics.store(controlBuf, 0, 0);             // mark: waiting
-  self.postMessage({ type: "input-request" }); // ask main thread for a line
-  Atomics.wait(controlBuf, 0, 0);              // park until main notifies
+  if (!controlBuf) {
+    throw new Error("stdin requires SharedArrayBuffer. Please serve with COOP/COEP headers.");
+  }
+  flushOut();                                  
+  Atomics.store(controlBuf, 0, 0);             
+  self.postMessage({ type: "input-request" }); 
+  Atomics.wait(controlBuf, 0, 0);              
 }
 
 // ─── env object ─────────────────────────────────────────────────────────────
@@ -60,26 +63,21 @@ function buildEnvObject(envImports) {
   };
 
   env.readline = (addr, maxLen) => {
+    const mem = new Uint8Array(lastInstance.exports.memory.buffer);
+
+    // Graceful fallback: mimic EOF if SharedArrayBuffer is unavailable
+    if (!controlBuf || !dataBuf) {
+      self.stdout("[warn: stdin disabled — requires COOP/COEP headers]\n");
+      mem[addr] = 0; // null-terminate immediately
+      return 0;      // 0 bytes read
+    }
+
     blockForInput();
     const len = Atomics.load(controlBuf, 1);
-    const mem = new Uint8Array(lastInstance.exports.memory.buffer);
     const n   = Math.min(len, Math.max(0, maxLen - 1));
     for (let i = 0; i < n; i++) mem[addr + i] = dataBuf[i];
     mem[addr + n] = 0;         // null-terminate
     return n;
-  };
-
-  // line-buffered getchar
-  let _charBuf = [], _charPos = 0;
-  env.getchar = () => {
-    if (_charPos >= _charBuf.length) {
-      blockForInput();
-      const len = Atomics.load(controlBuf, 1);
-      _charBuf  = Array.from(dataBuf.subarray(0, len));
-      _charBuf.push(10);  // implicit '\n'
-      _charPos  = 0;
-    }
-    return _charPos < _charBuf.length ? _charBuf[_charPos++] : -1;
   };
 
   // ── user-defined imports ──────────────────────────────────────────────────

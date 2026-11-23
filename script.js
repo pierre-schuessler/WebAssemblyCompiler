@@ -584,8 +584,10 @@ function findAdminFile(id) {
 
 async function loadAdminProg(id) {
   autoSaveCurrentProg();
+  editingEnvFile = false;
   activeProg = { name: id, isUser: false };
   renderProgList();
+  renderEnvList();
   if (typeof progsCache[id] === "string") {
     document.getElementById("code").value = progsCache[id];
     updateLineNumbers();
@@ -612,8 +614,10 @@ async function loadAdminProg(id) {
 
 function loadUserProg(idx) {
   autoSaveCurrentProg();
+  editingEnvFile = false;
   activeProg = { isUser: true, idx, name: userProgs[idx].name };
   renderProgList();
+  renderEnvList();
   document.getElementById("code").value = userProgs[idx].code;
   updateLineNumbers();
   print(`<span class="c-muted">loaded: </span><span class="c-ok">${esc(userProgs[idx].name)}</span>`);
@@ -621,6 +625,11 @@ function loadUserProg(idx) {
 }
 
 function autoSaveCurrentProg() {
+  if (editingEnvFile) {
+    envFileCode = document.getElementById("code").value;
+    try { localStorage.setItem("wasm-env-js", envFileCode); } catch {}
+    return;
+  }
   if (!activeProg || !activeProg.isUser) return;
   if (activeProg.idx >= userProgs.length) return;
   userProgs[activeProg.idx].code = document.getElementById("code").value;
@@ -660,6 +669,7 @@ function createNewProg() {
   let name = document.getElementById("progNewName").value.trim();
   if (!name) { document.getElementById("progNewName").focus(); return; }
   autoSaveCurrentProg();
+  editingEnvFile = false;
   userProgs.push({ name, code: "" });
   try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
   const idx  = userProgs.length - 1;
@@ -668,20 +678,63 @@ function createNewProg() {
   updateLineNumbers();
   closeProgNewForm();
   renderProgList();
+  renderEnvList();
   print(`<span class="c-muted">created: </span><span class="c-ok">${esc(name)}</span>`);
   print("");
 }
 
-// ─── Env imports ─────────────────────────────────────────────────────────────
+// ─── Env imports (env.js virtual file) ──────────────────────────────────────
 
-let envImports = [
-  { name: "pow", sig: "i32 i32 => i32", body: "return Math.pow(a, b)|0;" },
-  { name: "log", sig: "i32 => i32",     body: "console.log(a); return a;" },
-  { name: "sleep", sig: "i32 => i32", body: "const target = Date.now() + a; const ctrl = new Int32Array(controlSAB); while (Date.now() < target) { Atomics.wait(ctrl, 0, 1, 10); } return 0;"},
-  { name: "readline", sig: "i32 i32 => i32", body: "return env.readline(a, b);"}
-];
+const DEFAULT_ENV_CODE = `// Define your WASM host environment functions here.
+// Add a '// (type)(type) => (type)' or '/** @type {(type)(type) => (type)} */'
+// comment above any function to specify custom WASM types
+// (int32, int64, float32, float64, empty).
+// If omitted, parameters default to (int32) and return type defaults to (int32).
 
-let editingIdx = null;
+export default {
+  // (int32) => (int32)
+  putchar(c) {
+    // static function that cannot be modified
+    // prints a single character to stdout, then returns the character code
+  },
+
+  // (int32)(int32) => (int32)
+  readline(addr, maxLen) {
+    // static function that cannot be modified
+    // reads a line of input from stdin, writes it to memory at addr,
+    // and returns the number of bytes written (not including null terminator)
+  },
+
+  // (int32)(int32) => (int32)
+  pow(a, b) {
+    return Math.pow(a, b) | 0;
+  },
+
+  // (int32) => (int32)
+  log(a) {
+    console.log(a);
+    return a;
+  },
+
+  // (int32) => (int32)
+  sleep(a) {
+    const target = Date.now() + a;
+    // Fall back to a standard while-loop if controlSAB is missing
+    if (typeof controlSAB === "undefined") {
+      while (Date.now() < target) {} 
+      return 0;
+    }
+    const ctrl = new Int32Array(controlSAB);
+    while (Date.now() < target) {
+      Atomics.wait(ctrl, 0, 1, 10);
+    }
+    return 0;
+  }
+};
+`;
+
+let envFileCode = localStorage.getItem("wasm-env-js") ?? DEFAULT_ENV_CODE;
+let editingEnvFile = false;
 
 function toggleEnvPanel() {
   const panel    = document.getElementById("sidePanel");
@@ -689,83 +742,207 @@ function toggleEnvPanel() {
   const collapsed = panel.classList.toggle("collapsed");
   btn.classList.toggle("active", !collapsed);
   document.getElementById("resizeEnv").classList.toggle("hidden-handle", collapsed);
+  if (!collapsed) renderEnvList();
+}
+
+function openEnvFileInEditor() {
+  autoSaveCurrentProg();
+  activeProg = null;
+  editingEnvFile = true;
+  renderProgList();
+  renderEnvList();
+
+  document.getElementById("code").value = envFileCode;
+  updateLineNumbers();
+  if (editor?.refresh) editor.refresh();
+
+  print(`<span class="c-muted">opened: </span><span class="c-ok">env.js</span>`);
+  print("");
+}
+
+function resetEnvFile() {
+  envFileCode = DEFAULT_ENV_CODE;
+  try { localStorage.removeItem("wasm-env-js"); } catch {}
+
+  if (editingEnvFile) {
+    document.getElementById("code").value = envFileCode;
+    updateLineNumbers();
+    if (editor?.refresh) editor.refresh();
+  }
+
+  renderEnvList();
+  print(`<span class="c-muted">env.js reset to defaults</span>`);
+  print("");
+}
+
+function parseEnvImports() {
+  const cleanCode = envFileCode.replace(/^\s*export\s+default\s+/m, "return ");
+  let envObj;
+  try {
+    envObj = new Function(cleanCode)();
+  } catch (err) {
+    throw new Error(`env.js syntax error: ${err.message}`);
+  }
+
+  if (!envObj || typeof envObj !== "object") {
+    throw new Error("env.js must export an object of functions");
+  }
+
+  // Mask comments with spaces of identical length so indices match envFileCode 1:1
+  // without false-matching `{` or `,` inside comments.
+  const maskedCode = envFileCode.replace(
+    /\/\*[\s\S]*?\*\/|\/\/.*$/gm,
+    (m) => " ".repeat(m.length)
+  );
+
+  // Maps compiler type names to standard WASM type names for the worker/UI
+  const normalizeType = (t) => {
+    switch (t.trim()) {
+      case "int32":   case "i32": return "i32";
+      case "int64":   case "i64": return "i64";
+      case "float32": case "f32": return "f32";
+      case "float64": case "f64": return "f64";
+      case "empty":   case "void": return "void";
+      default:
+        throw new Error(`env.js: unknown type '${t.trim()}'`);
+    }
+  };
+
+  // Extracts all parenthesized types like "(int32)(float64)" -> ["i32", "f64"]
+  const extractCompilerTypes = (typeStr) => {
+    if (!typeStr || !typeStr.trim()) return [];
+    const matches = [...typeStr.matchAll(/\(([^)]+)\)/g)];
+    if (matches.length > 0) {
+      return matches
+        .flatMap(m => m[1].split(","))
+        .map(normalizeType)
+        .filter(t => t !== "void");
+    }
+    const single = normalizeType(typeStr);
+    return single === "void" ? [] : [single];
+  };
+
+  return Object.entries(envObj).map(([name, fn]) => {
+    if (typeof fn !== "function") {
+      throw new Error(`env.js: "${name}" must be a function`);
+    }
+
+    const src = fn.toString();
+    const paramMatch = src.match(/^[^(]*\(([^)]*)\)/);
+    const params = paramMatch
+      ? paramMatch[1].split(",").map(p => p.trim()).filter(Boolean)
+      : [];
+
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Match method shorthand `foo(...) {` or property syntax `foo: (...) =>` / `foo: function(...)`
+    const declRegex = new RegExp(
+      `(?:^|[,{\\s])(?:async\\s+)?${escapedName}\\s*(?:\\([^)]*\\)\\s*\\{|:\\s*(?:async\\s+)?(?:function\\s*)?\\([^)]*\\))`,
+      "m"
+    );
+    const fnDeclMatch = declRegex.exec(maskedCode);
+
+    let typeMatch = null;
+    if (fnDeclMatch) {
+      const beforeMasked = maskedCode.slice(0, fnDeclMatch.index + 1);
+      const lastBoundary = Math.max(
+        beforeMasked.lastIndexOf(","),
+        beforeMasked.lastIndexOf("{")
+      );
+
+      const leadingTrivia = envFileCode.slice(lastBoundary + 1, fnDeclMatch.index);
+
+      // Matches `// (int32)(int32) => (int32)` or `/** @type {(int32)(int32) => (int32)} */`
+      // Also supports `=> (empty)` or `=> empty` for void return
+      const typeRegex =
+        /\/\*\*[\s\S]*?@type\s*\{\s*((?:\([^)]*\)\s*)*)=>\s*(\([^)]+\)|[a-z0-9_]+)\s*\}[\s\S]*?\*\/|\/\/\s*(?:@type\s*)?((?:\([^)]*\)\s*)*)=>\s*(\([^)]+\)|[a-z0-9_]+)/g;
+
+      const matches = [...leadingTrivia.matchAll(typeRegex)];
+      if (matches.length > 0) {
+        typeMatch = matches[matches.length - 1];
+      }
+    }
+
+    let sig;
+    if (typeMatch) {
+      const rawArgs = typeMatch[1] !== undefined ? typeMatch[1] : (typeMatch[3] || "");
+      const rawRet  = typeMatch[2] !== undefined ? typeMatch[2] : (typeMatch[4] || "(empty)");
+
+      const argTypes = extractCompilerTypes(rawArgs).join(" ");
+      const retTypes = extractCompilerTypes(rawRet);
+      const retStr   = retTypes.length ? retTypes.join(" ") : "void";
+
+      sig = `${argTypes} => ${retStr}`.trim();
+    } else {
+      // Fallback: assume all params and return type are i32 (int32)
+      sig = `${params.map(() => "i32").join(" ")} => i32`.trim();
+    }
+
+    const bodyStart = src.indexOf("{");
+    let body = bodyStart !== -1
+      ? src.slice(bodyStart + 1, src.lastIndexOf("}")).trim()
+      : `return (${src.slice(src.indexOf("=>") + 2).trim()});`;
+
+    const stdNames = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    const aliases = params
+      .map((p, i) => (stdNames[i] && p !== stdNames[i] ? `const ${p} = ${stdNames[i]};` : ""))
+      .filter(Boolean)
+      .join(" ");
+
+    return {
+      name,
+      sig,
+      body: aliases ? `${aliases}\n${body}` : body
+    };
+  });
 }
 
 function renderEnvList() {
   const list = document.getElementById("envList");
-  if (!envImports.length) {
-    list.innerHTML = '<div class="env-empty">No env imports.<br>Click + to add one.</div>';
-    return;
+  if (!list) return;
+
+  let parsed = [];
+  let parseErr = null;
+  try {
+    parsed = parseEnvImports();
+  } catch (err) {
+    parseErr = err.message;
   }
-  list.innerHTML = envImports
-    .map(
-      (e, i) => `
-        <div class="env-item" data-idx="${i}">
-            <div class="env-item-name">${esc(e.name)}</div>
-            <div class="env-item-sig">${esc(e.sig || "")}</div>
-            <div class="env-item-actions">
-                <button class="env-action-btn" data-action="edit"   data-idx="${i}">✎</button>
-                <button class="env-action-btn del" data-action="delete" data-idx="${i}">✕</button>
-            </div>
-        </div>`,
-    )
-    .join("");
-  list.querySelectorAll(".env-item").forEach((el) => {
-    el.addEventListener("click", () => selectEnv(Number(el.dataset.idx)));
+
+  let html = `
+    <div class="prog-file-item${editingEnvFile ? " active" : ""}" id="openEnvJsBtn">
+      <span class="prog-file-icon">⚙</span>
+      <span class="prog-file-name">
+        env.js
+        <span class="prog-file-id">Host environment</span>
+      </span>
+      <button class="env-action-btn" id="resetEnvJsBtn" title="Reset env.js to default">↺</button>
+    </div>
+  `;
+
+  if (parseErr) {
+    html += `<div class="env-empty" style="color:var(--red);">${esc(parseErr)}</div>`;
+  } else if (!parsed.length) {
+    html += `<div class="env-empty">No functions declared in env.js</div>`;
+  } else {
+    html += `<div class="prog-section-label">Active Imports (${parsed.length})</div>`;
+    html += parsed.map(e => `
+      <div class="env-item">
+        <div class="env-item-name">${esc(e.name)}</div>
+        <div class="env-item-sig">${esc(e.sig)}</div>
+      </div>
+    `).join("");
+  }
+
+  list.innerHTML = html;
+  document.getElementById("openEnvJsBtn")?.addEventListener("click", (e) => {
+    if (e.target.closest("#resetEnvJsBtn")) return;
+    openEnvFileInEditor();
   });
-  list.querySelectorAll(".env-action-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const idx = Number(btn.dataset.idx);
-      if (btn.dataset.action === "edit")        editEnv(idx);
-      else if (btn.dataset.action === "delete") deleteEnv(idx);
-    });
+  document.getElementById("resetEnvJsBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    resetEnvFile();
   });
-}
-
-function selectEnv(i) {
-  document.querySelectorAll(".env-item")
-    .forEach((el, j) => el.classList.toggle("selected", j === i));
-}
-
-function openForm(idx = null) {
-  editingIdx = idx;
-  document.getElementById("envFormTitle").textContent = idx === null ? "New Import" : "Edit Import";
-  const e = idx !== null ? envImports[idx] : { name: "", sig: "", body: "" };
-  document.getElementById("envName").value = e.name;
-  document.getElementById("envSig").value  = e.sig;
-  document.getElementById("envBody").value = e.body;
-  document.getElementById("envForm").classList.remove("hidden");
-  document.getElementById("envName").focus();
-}
-
-function closeForm() {
-  document.getElementById("envForm").classList.add("hidden");
-  editingIdx = null;
-}
-
-function editEnv(i)   { openForm(i); }
-
-function deleteEnv(i) {
-  envImports.splice(i, 1);
-  renderEnvList();
-  closeForm();
-  print(`<span class="c-muted">env import removed</span>`);
-  print("");
-}
-
-function saveEnv() {
-  const name = document.getElementById("envName").value.trim();
-  const sig  = document.getElementById("envSig").value.trim();
-  const body = document.getElementById("envBody").value.trim();
-  if (!name) { document.getElementById("envName").focus(); return; }
-  const entry = { name, sig, body };
-  if (editingIdx !== null) envImports[editingIdx] = entry;
-  else envImports.push(entry);
-  renderEnvList();
-  closeForm();
-  print(`<span class="c-muted">env import saved: </span><span class="c-ok">${esc(name)}</span>`);
-  print("");
 }
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
@@ -774,10 +951,6 @@ document.getElementById("activityEnv").addEventListener("click",     toggleEnvPa
 document.getElementById("activityDocs").addEventListener("click",    toggleDocsPanel);
 document.getElementById("activityProg").addEventListener("click",    toggleProgPanel);
 document.getElementById("activitySources").addEventListener("click", toggleSourcesPanel);
-
-document.getElementById("envAddBtn").addEventListener("click",    () => openForm());
-document.getElementById("envCancelBtn").addEventListener("click", closeForm);
-document.getElementById("envSaveBtn").addEventListener("click",   saveEnv);
 
 document.getElementById("docsBack").addEventListener("click", showDocsList);
 
@@ -790,8 +963,17 @@ document.getElementById("progNewName").addEventListener("keydown", (e) => {
 });
 
 document.getElementById("code").addEventListener("input", () => {
+  const val = document.getElementById("code").value;
+
+  if (editingEnvFile) {
+    envFileCode = val;
+    try { localStorage.setItem("wasm-env-js", envFileCode); } catch {}
+    renderEnvList();
+    return;
+  }
+
   if (activeProg && activeProg.isUser) {
-    userProgs[activeProg.idx].code = document.getElementById("code").value;
+    userProgs[activeProg.idx].code = val;
     try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
   }
 });
@@ -881,6 +1063,7 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-muted">  make [args]     — compile &amp; run all exports</span>`);
     print(`<span class="c-muted">  hex             — full hex dump of binary</span>`);
     print(`<span class="c-muted">  wat             — disassemble binary to WebAssembly Text Format</span>`);
+    print(`<span class="c-muted">  resetenv        — reset env.js to defaults</span>`);
     print(`<span class="c-muted">  kill            — terminate worker (stops infinite loops)</span>`);
     print(`<span class="c-muted">  clear           — clear terminal</span>`);
   }
@@ -890,6 +1073,11 @@ async function runCommand(raw, isInternal = false) {
     termOutput.innerHTML = "";
   }
 
+  // ── resetenv: restore default env.js ───────────────────────────────────────
+  else if (verb === "resetenv") {
+    resetEnvFile();
+  }
+
   // ── kill: abort a hung worker ──────────────────────────────────────────────
   else if (verb === "kill") {
     killWorker();
@@ -897,6 +1085,11 @@ async function runCommand(raw, isInternal = false) {
 
   // ── compile ────────────────────────────────────────────────────────────────
   else if (verb === "compile") {
+    if (editingEnvFile) {
+      print(`<span class="c-warn">⚠ env.js is currently open — select a program to compile</span>`);
+      return;
+    }
+
     const code = document.getElementById("code").value;
     if (!code.trim()) { print(`<span class="c-err">editor is empty</span>`); return; }
 
@@ -922,12 +1115,13 @@ async function runCommand(raw, isInternal = false) {
         hex += `<span class="c-muted">… +${binary.length - 48}</span>`;
       print(`<span class="c-hex">${hex}</span>`);
 
-      // Hand binary + env config to the worker for WebAssembly.instantiate()
+      // Parse env.js and hand binary + env config to the worker for WebAssembly.instantiate()
       // We copy (not transfer) so lastBinary stays valid for `hex` and `wat` commands.
+      const parsedEnvImports = parseEnvImports();
       const result = await workerSend({
         type:       "compile",
         binary:     binary,
-        envImports: envImports,
+        envImports: parsedEnvImports,
       });
 
       lastFuncExports = result.funcExports;

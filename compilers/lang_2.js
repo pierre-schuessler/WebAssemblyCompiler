@@ -776,6 +776,7 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
         case "float32": return { opcode: [0x7d] };
         case "float64": return { opcode: [0x7c] };
 
+        case "drop":    return { opcode: [0x1a], popCount: 1, pushType: null };
         case "nop":     return { opcode: [0x01], popCount: 0, pushType: null };
         case "return":  return { opcode: [0x0f], popCount: 0, pushType: null };
         case "end":     return { opcode: [0x0b], popCount: 0, pushType: null };
