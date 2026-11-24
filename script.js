@@ -2,12 +2,12 @@
 
 const COMPILER_SOURCES = [
   { id: "lang_1",  label: "Language v1", path: "./compilers/lang_1.js" },
-  { id: 'lang_2',  label: "Language v2", path: "./compilers/lang_2.js" },
+  { id: "lang_2",  label: "Language v2", path: "./compilers/lang_2.js" },
 ];
 
 const EDITOR_SOURCES = [
   { id: "lang_1",  label: "Language v1", path: "./editors/lang_1.js" },
-  { id: "lang_2", label:"Language v2", path: "./editors/lang_2.js"}
+  { id: "lang_2",  label: "Language v2", path: "./editors/lang_2.js" },
 ];
 
 // ─── Active source state ─────────────────────────────────────────────────────
@@ -15,18 +15,236 @@ const EDITOR_SOURCES = [
 let activeCompilerId = localStorage.getItem("wasm-compiler-src") || COMPILER_SOURCES[0].id;
 let activeEditorId   = localStorage.getItem("wasm-editor-src")   || EDITOR_SOURCES[0].id;
 
-let compile    = null;
+let compile    = null;   // (code, libs) => Uint8Array | Promise<Uint8Array>
 let initEditor = null;
 let editor     = null;
+
+// ─── Versions store ──────────────────────────────────────────────────────────
+// NOTE: must stay above bootstrap() — loadCompiler() reads it synchronously.
+//
+// { [progName]: [ { id, n, ts, label, code, binary(b64), size,
+//                   compiler: { id, label } } ] }
+
+const VERSIONS_KEY = "wasm-versions";
+let versions = {};
+try { versions = JSON.parse(localStorage.getItem(VERSIONS_KEY) || "{}"); } catch {}
+
+// A binary is only trustworthy if it was built from exactly the version's current
+// code. `hash` is the hash of the code that produced `binary`.
+function hashCode(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return s.length + ":" + (h >>> 0).toString(16);
+}
+function isStale(ver) { return ver.hash !== hashCode(ver.code); }
+
+// versions saved before `hash` existed were in sync by construction
+for (const list of Object.values(versions))
+  for (const v of list) v.hash ??= hashCode(v.code);
+
+// Rebuilds a version's binary with the active compiler whenever its code changed.
+// Never rejects: on failure the version stays stale and `error` says why.
+const verChain  = new Map();   // id → promise (serialises rebuilds per version)
+const verTimers = new Map();   // id → debounce timer
+
+function scheduleVersionSync(id) {
+  clearTimeout(verTimers.get(id));
+  verTimers.set(id, setTimeout(() => syncVersion(id), 800));
+}
+
+function syncVersion(id) {
+  clearTimeout(verTimers.get(id));
+  verTimers.delete(id);
+  const run = async () => {
+    const hit = findVersion(id);
+    if (!hit || !isStale(hit.ver)) { persistVersions(); return; }
+    const ver = hit.ver, code = ver.code;
+    try {
+      const binary = await compile(code, await gatherLibs(code));
+      if (!binary) throw new Error("compile() returned null");
+      ver.binary   = toB64(binary);
+      ver.size     = binary.length;
+      ver.hash     = hashCode(code);            // hash of the code actually compiled
+      ver.compiler = { id: activeCompilerId, label: compilerLabel(activeCompilerId) };
+      delete ver.error;
+      if (activeCompilerId === "boot:" + id)
+        print(`<span class="c-muted">note: ${esc(compilerLabel(activeCompilerId))} was rebuilt — re-select it as compiler to load the new binary</span>`);
+    } catch (err) {
+      ver.error = err.message;
+    }
+    persistVersions();
+    renderProgList();
+  };
+  const p = (verChain.get(id) ?? Promise.resolve()).then(run);
+  verChain.set(id, p);
+  return p;
+}
+
+window.addEventListener("beforeunload", () => persistVersions());
+
+function persistVersions() {
+  try {
+    localStorage.setItem(VERSIONS_KEY, JSON.stringify(versions));
+    return true;
+  } catch (err) {
+    print(`<span class="c-err">✗ could not store versions (storage full?): ${esc(err.message)}</span>`);
+    return false;
+  }
+}
+
+function toB64(u8) {
+  let s = "";
+  for (let i = 0; i < u8.length; i += 0x8000)
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+function fromB64(b64) {
+  const s = atob(b64), u8 = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+  return u8;
+}
+
+function findVersion(id) {
+  for (const [prog, list] of Object.entries(versions)) {
+    const ver = list.find(v => v.id === id);
+    if (ver) return { prog, ver };
+  }
+  return null;
+}
+
+/** Built-in compilers + every saved version (id "boot:<versionId>"). */
+function allCompilerSources() {
+  const saved = [];
+  for (const [prog, list] of Object.entries(versions))
+    for (const v of list)
+      saved.push({
+        id:    "boot:" + v.id,
+        label: `${prog} v${v.n}`,
+        path:  `bootstrapped · built by ${v.compiler.label}`,
+      });
+  return [...COMPILER_SOURCES, ...saved];
+}
+
+function compilerLabel(id) {
+  return allCompilerSources().find(s => s.id === id)?.label ?? id;
+}
+
+// ─── Bootstrapped compiler (a compiled version used as the compiler) ─────────
+//
+// Protocol for a program that acts as a compiler:
+//   • must export `compiler.main` and `memory`
+//   • compiler.main() calls get_code(addr) to read the source, then compiles it to memory.
+//   • RETURN PROTOCOL:
+//     Option A (i32): Return the memory address. The host will read a 32-bit integer
+//                     (the length) from that address, and read the binary starting at address + 4.
+//     Option B (i64): Return a 64-bit integer combining length and address
+//                     ((length << 32) | address).
+
+const COMPILER_ENTRY = "compiler.main";
+
+async function makeBootstrappedCompiler(ver) {
+  const module  = await WebAssembly.compile(fromB64(ver.binary));
+  const imports = WebAssembly.Module.imports(module);
+  const exports = WebAssembly.Module.exports(module).map(e => e.name);
+  
+  if (!exports.includes(COMPILER_ENTRY))
+    throw new Error(`version has no exported '${COMPILER_ENTRY}'`);
+  if (!exports.includes("memory")) 
+    throw new Error("version has no exported 'memory'");
+
+  return async function compileBootstrapped(code /*, libs */) {
+    let instance = null;
+
+    const host = {
+      // putchar is left intact to prevent import errors if older versions still use it, 
+      // or if your new compiler wants to print debug logs to the terminal.
+      putchar(c) { console.log("compiler stdout:", c); return c; },
+      
+      get_code(addr) {
+        addr >>>= 0;
+        const bytes = new TextEncoder().encode(code);
+        const mem   = instance.exports.memory;
+        const need  = addr + bytes.length + 1;
+        if (need > mem.buffer.byteLength)
+          mem.grow(Math.ceil((need - mem.buffer.byteLength) / 65536));
+        const view = new Uint8Array(mem.buffer);
+        view.set(bytes, addr);
+        view[addr + bytes.length] = 0;      // null terminator
+        return bytes.length;
+      },
+      log(a)    { console.log(a); return a; },
+      pow(a, b) { return Math.pow(a, b) | 0; },
+    };
+
+    const env = {};
+    for (const imp of imports) {
+      if (imp.module !== "env" || imp.kind !== "function" || !(imp.name in host))
+        throw new Error(`bootstrapped compiler imports unsupported ${imp.module}.${imp.name}`);
+      env[imp.name] = host[imp.name];
+    }
+
+    instance = await WebAssembly.instantiate(module, { env });
+
+    // Execute the compiler entry point
+    const result = instance.exports[COMPILER_ENTRY]();
+    const memBuffer = instance.exports.memory.buffer;
+
+    let binLength, binStart;
+
+    if (typeof result === "bigint") {
+      // Option B: i64 return type (Length in high 32 bits, Address in low 32 bits)
+      binStart  = Number(result & 0xFFFFFFFFn);
+      binLength = Number(result >> 32n);
+    } else {
+      // Option A: i32 return type (Address returned; Length is stored at Address)
+      const addr = Number(result);
+      const dataView = new DataView(memBuffer);
+      binLength = dataView.getUint32(addr, true); // Read 4-byte length (little-endian)
+      binStart  = addr + 4;                       // Binary data starts immediately after
+    }
+
+    if (binStart + binLength > memBuffer.byteLength) {
+       throw new Error("Compiler returned an address and length that exceed allocated memory bounds.");
+    }
+
+    // Copy the binary out of WASM memory (using .slice() to create a detached copy)
+    const bin = new Uint8Array(memBuffer, binStart, binLength).slice();
+
+    const isWasm = bin.length >= 4 &&
+      bin[0] === 0x00 && bin[1] === 0x61 && bin[2] === 0x73 && bin[3] === 0x6D;
+
+    if (!isWasm) {
+      // If it doesn't start with \0asm, assume it's a compiler error string
+      const msg = new TextDecoder().decode(bin).trim();
+      throw new Error(msg || "bootstrapped compiler produced no valid wasm output");
+    }
+
+    return bin;
+  };
+}
 
 // ─── Dynamic loader ──────────────────────────────────────────────────────────
 
 async function loadCompiler(id) {
-  const src = COMPILER_SOURCES.find(s => s.id === id) ?? COMPILER_SOURCES[0];
-  const mod  = await import(src.path);
-  compile    = mod.compile;
-  activeCompilerId = src.id;
-  localStorage.setItem("wasm-compiler-src", src.id);
+  if (id.startsWith("boot:")) {
+    const vid = id.slice(5);
+    const hit = findVersion(vid);
+    if (!hit) throw new Error("saved version not found");
+    if (isStale(hit.ver) && compile) await syncVersion(vid);   // rebuild first
+    if (isStale(hit.ver))
+      throw new Error(hit.ver.error
+        ? `binary is out of sync with its code, and the code does not compile: ${hit.ver.error}`
+        : "binary is out of sync with its code");
+    compile = await makeBootstrappedCompiler(hit.ver);
+    activeCompilerId = id;
+  } else {
+    const src = COMPILER_SOURCES.find(s => s.id === id) ?? COMPILER_SOURCES[0];
+    const mod = await import(src.path);
+    compile   = mod.compile;
+    activeCompilerId = src.id;
+  }
+  localStorage.setItem("wasm-compiler-src", activeCompilerId);
 }
 
 async function loadEditor(id) {
@@ -39,7 +257,8 @@ async function loadEditor(id) {
 
 async function bootstrap() {
   await Promise.all([
-    loadCompiler(activeCompilerId),
+    // fall back to the first built-in if a saved bootstrapped version is gone / broken
+    loadCompiler(activeCompilerId).catch(() => loadCompiler(COMPILER_SOURCES[0].id)),
     loadEditor(activeEditorId),
   ]);
 
@@ -64,23 +283,26 @@ function toggleSourcesPanel() {
   if (open) renderSourcesPanel();
 }
 
+async function switchCompiler(id) {
+  if (id === activeCompilerId) return;
+  print(`<span class="c-muted">switching compiler → </span><span class="c-ok">${esc(compilerLabel(id))}</span>`);
+  try {
+    await loadCompiler(id);
+    renderSourcesPanel();
+    renderProgList();
+    print(`<span class="c-ok">✓ compiler loaded: ${esc(compilerLabel(id))}</span>`);
+  } catch (err) {
+    print(`<span class="c-err">✗ failed to load compiler "${esc(compilerLabel(id))}": ${esc(err.message)}</span>`);
+  }
+  print("");
+}
+
 function renderSourcesPanel() {
   renderSourceGroup(
     "srcCompilerList",
-    COMPILER_SOURCES,
+    allCompilerSources(),
     activeCompilerId,
-    async (id) => {
-      if (id === activeCompilerId) return;
-      print(`<span class="c-muted">switching compiler → </span><span class="c-ok">${esc(id)}</span>`);
-      try {
-        await loadCompiler(id);
-        renderSourcesPanel();
-        print(`<span class="c-ok">✓ compiler loaded: ${esc(id)}</span>`);
-      } catch (err) {
-        print(`<span class="c-err">✗ failed to load compiler "${esc(id)}": ${esc(err.message)}</span>`);
-      }
-      print("");
-    }
+    switchCompiler
   );
 
   renderSourceGroup(
@@ -134,8 +356,11 @@ function initApp() {
   updateLineNumbers();
   initWorker();
 
+  for (const list of Object.values(versions))
+    for (const v of list) if (isStale(v)) syncVersion(v.id);
+
   print(`<span class="c-info">WASM Compiler ready.</span>`);
-  print(`<span class="c-muted">compile · run &lt;fn&gt; [args] · make · hex · wat · clear · help</span>`);
+  print(`<span class="c-muted">compile · run &lt;fn&gt; [args] · make · save · versions · compiler · hex · wat · clear · help</span>`);
   print("");
 }
 
@@ -254,7 +479,7 @@ function _spawnWorker() {
           row.innerHTML = `<span class="c-muted">stdin › </span><span class="c-ok">${esc(value)}</span>`;
           termInput.disabled = false;
           termInput.focus();
-          
+
           if (controlSAB && dataSAB) {
             const encoded  = new TextEncoder().encode(value);
             const dataView = new Uint8Array(dataSAB);
@@ -527,7 +752,9 @@ function toggleProgPanel() {
 
 function renderProgList() {
   const list = document.getElementById("progFileList");
+  if (!list) return;
   let html = "";
+
   for (const section of PROG_SECTIONS) {
     if (!section.files.length) continue;
     html += `<div class="prog-section-label">${esc(section.label)}</div>`;
@@ -542,6 +769,7 @@ function renderProgList() {
     </div>`;
     }
   }
+  
   if (userProgs.length > 0) {
     html += `<div class="prog-section-label">My Programs</div>`;
     html += userProgs.map((p, i) => {
@@ -553,12 +781,82 @@ function renderProgList() {
       </div>`;
     }).join("");
   }
+  
   const totalAdminFiles = PROG_SECTIONS.reduce((n, s) => n + s.files.length, 0);
   if (!totalAdminFiles && !userProgs.length) {
     html = `<div class="env-empty">No programs yet.<br>Click + to create one.</div>`;
   }
+
+  // ── Versions of the active program (Bootstrap Chain Table) ──────────────
+  if (currentProgName()) {
+    const vs   = versions[activeProg.name] || [];
+    const open = activeProg.verId;
+    
+    html += `<div class="prog-section-label">Bootstrap Chain — ${esc(activeProg.name)}</div>`;
+    html += `<div class="prog-file-item ver-item${!open ? " active" : ""}" data-act="work">
+      <span class="prog-file-icon">▸</span>
+      <span class="prog-file-name">Working copy</span>
+    </div>`;
+    html += `<div class="prog-file-item ver-item" data-act="save">
+      <span class="prog-file-icon">＋</span>
+      <span class="prog-file-name">New version
+        <span class="prog-file-id">forks the code in the editor</span></span>
+    </div>`;
+
+    if (vs.length > 0) {
+      html += `
+      <style>
+        .chain-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+        .chain-table th { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border, #444); color: var(--text-muted, #888); font-weight: normal; }
+        .chain-table td { padding: 8px; border-bottom: 1px solid var(--border-light, #333); vertical-align: top; cursor: pointer; }
+        .chain-table tr:hover { background: var(--bg-hover, #2a2a2a); }
+        .chain-table tr.active td { background: var(--bg-active, #333); border-left: 2px solid var(--accent, #55f); }
+        .chain-col-src { border-right: 1px solid var(--border-light, #333); width: 45%; }
+        .chain-col-bin { width: 55%; position: relative; }
+        .chain-meta { font-size: 11px; color: var(--text-muted, #888); margin-top: 4px; }
+        .chain-compiler { color: var(--accent, #55f); }
+        .chain-bin-actions { margin-top: 6px; display: flex; gap: 4px; }
+      </style>
+      <table class="chain-table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Binary</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+      for (const v of vs) {
+        const state = isStale(v)
+          ? "⚠ STALE" + (v.error ? " — " + v.error : " — rebuilding…")
+          : "✓ in sync";
+          
+        const isCompiler = activeCompilerId === "boot:" + v.id;
+
+        html += `
+          <tr class="ver-item${open === v.id ? " active" : ""}" data-act="load" data-id="${esc(v.id)}">
+            <td class="chain-col-src">
+              <strong style="color: var(--text, #eee)">v${v.n}</strong>${v.label ? " · " + esc(v.label) : ""}
+              <div class="chain-meta">${esc(state)}</div>
+            </td>
+            <td class="chain-col-bin">
+              <div>${v.size} B ${isCompiler ? '<span class="c-ok" style="font-size: 10px">(ACTIVE)</span>' : ''}</div>
+              <div class="chain-meta">Built by: <span class="chain-compiler">${esc(v.compiler.label)}</span></div>
+              <div class="chain-bin-actions">
+                <button class="env-action-btn" data-act="inspect" data-id="${esc(v.id)}" title="View Source, Hex & WAT">🔍</button>
+                <button class="env-action-btn" data-act="use" data-id="${esc(v.id)}" title="Use as compiler">⚙</button>
+                <button class="env-action-btn" data-act="del" data-id="${esc(v.id)}" title="Delete">✕</button>
+              </div>
+            </td>
+          </tr>`;
+      }
+      html += `</tbody></table>`;
+    }
+  }
+
   list.innerHTML = html;
-  list.querySelectorAll(".prog-file-item").forEach((el) => {
+
+  list.querySelectorAll(".prog-file-item:not(.ver-item)").forEach((el) => {
     el.addEventListener("click", async (e) => {
       if (e.target.classList.contains("prog-del-btn")) return;
       if (el.dataset.user === "1") loadUserProg(Number(el.dataset.idx));
@@ -570,6 +868,28 @@ function renderProgList() {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       deleteUserProg(Number(btn.dataset.idx));
+    });
+  });
+  list.querySelectorAll(".ver-item").forEach((el) => {
+    el.addEventListener("click", async (e) => {
+      const t = e.target.closest("[data-act]");
+      if (!t) return;
+      const act = t.dataset.act, id = t.dataset.id;
+      if (act === "inspect") {
+        openFullscreenViewer(id);
+      } else if (act === "save") {
+        const label = window.prompt("Version label (optional)");
+        if (label !== null) await saveVersion(label);
+      } else if (act === "load") {
+        const hit = findVersion(id);
+        if (hit) openVersion(hit.ver);
+      } else if (act === "work") {
+        if (activeProg?.verId) closeVersion();
+      } else if (act === "use") {
+        await switchCompiler("boot:" + id);
+      } else if (act === "del") {
+        deleteVersion(id);
+      }
     });
   });
 }
@@ -630,6 +950,8 @@ function autoSaveCurrentProg() {
     try { localStorage.setItem("wasm-env-js", envFileCode); } catch {}
     return;
   }
+  const bound = boundVersion();
+  if (bound) { bound.code = document.getElementById("code").value; persistVersions(); return; }
   if (!activeProg || !activeProg.isUser) return;
   if (activeProg.idx >= userProgs.length) return;
   userProgs[activeProg.idx].code = document.getElementById("code").value;
@@ -683,6 +1005,117 @@ function createNewProg() {
   print("");
 }
 
+// ─── Program versions (new / open / sync / delete) ──────────────────────────
+//
+// A version is a file of its own: opening it binds the editor to it, so edits go
+// straight into that version (no need to create another program) and its binary
+// is rebuilt automatically. A binary is never trusted unless its `hash` matches
+// the current code (see isStale / syncVersion).
+
+/** Name under which versions are filed: user prog name or admin prog id. */
+function currentProgName() {
+  return !editingEnvFile && activeProg ? activeProg.name : null;
+}
+
+/** The version currently open in the editor (edits go into it), or null. */
+function boundVersion() {
+  if (!activeProg?.verId) return null;
+  const hit = findVersion(activeProg.verId);
+  if (!hit) { delete activeProg.verId; return null; }
+  return hit.ver;
+}
+
+/** Fork the code in the editor into a new version, compile it, and keep editing that. */
+async function saveVersion(label = "") {
+  const name = currentProgName();
+  if (!name) { print(`<span class="c-warn">⚠ open or create a program first</span>`); return; }
+
+  const code = document.getElementById("code").value;
+  if (!code.trim()) { print(`<span class="c-err">editor is empty</span>`); return; }
+
+  print(`<span class="c-muted">compiling with ${esc(compilerLabel(activeCompilerId))}…</span>`);
+  try {
+    const libs   = await gatherLibs(code);
+    const binary = await compile(code, libs);
+    if (!binary) throw new Error("compile() returned null");
+
+    const list = (versions[name] ??= []);
+    const n = list.reduce((m, v) => Math.max(m, v.n), 0) + 1;
+    const ver = {
+      id:     Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      n,
+      ts:     Date.now(),
+      label:  label.trim(),
+      code,
+      binary: toB64(binary),
+      size:   binary.length,
+      hash:   hashCode(code),
+      compiler: { id: activeCompilerId, label: compilerLabel(activeCompilerId) },
+    };
+    list.push(ver);
+    if (!persistVersions()) { list.pop(); return; }
+
+    activeProg.verId = ver.id;     // from now on the editor edits this version
+    const now = document.getElementById("code").value;
+    if (now !== code) { ver.code = now; scheduleVersionSync(ver.id); }   // typed during compile
+
+    print(`<span class="c-ok">✓ saved ${esc(name)} v${n}</span><span class="c-muted"> · ${binary.length} B · built by ${esc(compilerLabel(activeCompilerId))} · now editing it</span>`);
+    renderProgList();
+    renderSourcesPanel();
+  } catch (err) {
+    print(`<span class="c-err">✗ ${esc(err.message)}</span>`);
+  }
+  print("");
+}
+
+/** Open a saved version in the editor; further edits modify it in place. */
+function openVersion(ver) {
+  autoSaveCurrentProg();            // flush the working copy / the version open so far
+  activeProg.verId = ver.id;
+  document.getElementById("code").value = ver.code;
+  updateLineNumbers();
+  editor?.refresh?.();
+  renderProgList();
+  print(`<span class="c-muted">editing: </span><span class="c-ok">${esc(activeProg.name)} v${ver.n}</span>`);
+  print("");
+}
+
+/** Put the program's own (non-versioned) code back into the editor. */
+function loadWorkingCopy() {
+  delete activeProg.verId;
+  const code = activeProg.isUser
+    ? (userProgs[activeProg.idx]?.code ?? "")
+    : (progsCache[activeProg.name] ?? "");
+  document.getElementById("code").value = code;
+  updateLineNumbers();
+  editor?.refresh?.();
+}
+
+function closeVersion() {
+  autoSaveCurrentProg();
+  loadWorkingCopy();
+  renderProgList();
+  print(`<span class="c-muted">back to the working copy</span>`);
+  print("");
+}
+
+function deleteVersion(id) {
+  const hit = findVersion(id);
+  if (!hit) return;
+  clearTimeout(verTimers.get(id));
+  verTimers.delete(id);
+  if (activeProg?.verId === id) loadWorkingCopy();
+  versions[hit.prog] = versions[hit.prog].filter(v => v.id !== id);
+  if (!versions[hit.prog].length) delete versions[hit.prog];
+  persistVersions();
+  renderProgList();
+  renderSourcesPanel();
+  print(`<span class="c-muted">deleted: </span><span class="c-warn">${esc(hit.prog)} v${hit.ver.n}</span>`);
+  if (activeCompilerId === "boot:" + id)
+    print(`<span class="c-warn">⚠ it is the active compiler: still loaded, but will fall back to ${esc(COMPILER_SOURCES[0].label)} on reload</span>`);
+  print("");
+}
+
 // ─── Env imports (env.js virtual file) ──────────────────────────────────────
 
 const DEFAULT_ENV_CODE = `// Define your WASM host environment functions here.
@@ -702,6 +1135,13 @@ export default {
   readline(addr, maxLen) {
     // static function that cannot be modified
     // reads a line of input from stdin, writes it to memory at addr,
+    // and returns the number of bytes written (not including null terminator)
+  },
+
+  // (int32) => (int32)
+  get_code(addr) {
+    // static function that cannot be modified
+    // writes the full source code (UTF-8, null-terminated) to memory at addr,
     // and returns the number of bytes written (not including null terminator)
   },
 
@@ -822,7 +1262,7 @@ function parseEnvImports() {
     return single === "void" ? [] : [single];
   };
 
-  return Object.entries(envObj).map(([name, fn]) => {
+  const imports = Object.entries(envObj).map(([name, fn]) => {
     if (typeof fn !== "function") {
       throw new Error(`env.js: "${name}" must be a function`);
     }
@@ -895,6 +1335,13 @@ function parseEnvImports() {
       body: aliases ? `${aliases}\n${body}` : body
     };
   });
+
+  // get_code is a worker built-in; make sure it is always declared, even if the
+  // user's saved env.js predates it.
+  if (!imports.some(i => i.name === "get_code"))
+    imports.push({ name: "get_code", sig: "i32 => i32", body: "" });
+
+  return imports;
 }
 
 function renderEnvList() {
@@ -972,6 +1419,15 @@ document.getElementById("code").addEventListener("input", () => {
     return;
   }
 
+  const bound = boundVersion();
+  if (bound) {
+    const wasStale = isStale(bound);
+    bound.code = val;
+    if (!wasStale && isStale(bound)) renderProgList();   // show STALE right away
+    scheduleVersionSync(bound.id);                        // rebuild the binary shortly
+    return;
+  }
+
   if (activeProg && activeProg.isUser) {
     userProgs[activeProg.idx].code = val;
     try { localStorage.setItem("wasm-user-progs", JSON.stringify(userProgs)); } catch {}
@@ -1043,6 +1499,22 @@ async function gatherLibs(code) {
   return libs;
 }
 
+// ─── Terminal Commands ───────────────────────────────────────────────────────
+
+/** Helper to resolve a version number or compiler ID to a Uint8Array binary */
+function getBinaryArg(arg) {
+  if (!arg) return lastBinary;
+  let ver = null;
+  if (arg.startsWith("boot:")) {
+    const hit = findVersion(arg.slice(5));
+    if (hit) ver = hit.ver;
+  } else {
+    // Treat as version number for the current program
+    ver = (versions[currentProgName()] || []).find(v => v.n === Number(arg));
+  }
+  return (ver && ver.binary) ? fromB64(ver.binary) : null;
+}
+
 async function runCommand(raw, isInternal = false) {
   const cmd = raw.trim();
   if (!cmd) return;
@@ -1061,8 +1533,13 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-muted">  run fn [args]   — call exported function</span>`);
     print(`<span class="c-muted">  boot [args]     — compile &amp; run "main" with given args</span>`);
     print(`<span class="c-muted">  make [args]     — compile &amp; run all exports</span>`);
-    print(`<span class="c-muted">  hex             — full hex dump of binary</span>`);
-    print(`<span class="c-muted">  wat             — disassemble binary to WebAssembly Text Format</span>`);
+    print(`<span class="c-muted">  save [label]    — fork the editor code into a new version (and edit it)</span>`);
+    print(`<span class="c-muted">  versions        — list saved versions of this program</span>`);
+    print(`<span class="c-muted">  open &lt;n&gt;       — edit version n in place (binary rebuilds automatically)</span>`);
+    print(`<span class="c-muted">  close           — back to the program's working copy</span>`);
+    print(`<span class="c-muted">  compiler [n|id] — show / switch compiler (version n, or e.g. lang_2)</span>`);
+    print(`<span class="c-muted">  hex [n|id]      — full hex dump of last compiled binary or specific version</span>`);
+    print(`<span class="c-muted">  wat [n|id]      — disassemble binary to WebAssembly Text Format</span>`);
     print(`<span class="c-muted">  resetenv        — reset env.js to defaults</span>`);
     print(`<span class="c-muted">  kill            — terminate worker (stops infinite loops)</span>`);
     print(`<span class="c-muted">  clear           — clear terminal</span>`);
@@ -1083,6 +1560,46 @@ async function runCommand(raw, isInternal = false) {
     killWorker();
   }
 
+  // ── save: compile + store a version ────────────────────────────────────────
+  else if (verb === "save") {
+    await saveVersion(parts.slice(1).join(" "));
+    return;
+  }
+
+  // ── versions: list saved versions ──────────────────────────────────────────
+  else if (verb === "versions") {
+    const vs = versions[currentProgName()] || [];
+    if (!vs.length) print(`<span class="c-muted">no saved versions</span>`);
+    for (const v of vs)
+      print(`<span class="c-muted">  v${v.n}${activeProg?.verId === v.id ? "*" : ""}</span> ${esc(v.label)} <span class="c-muted">· ${isStale(v) ? "STALE" : "in sync"} · built by ${esc(v.compiler.label)} · ${v.size} B</span>`);
+  }
+
+  // ── open: edit a saved version in place ───────────────────────────────────
+  else if (verb === "open") {
+    const ver = (versions[currentProgName()] || []).find(v => v.n === Number(parts[1]));
+    if (ver) openVersion(ver);
+    else print(`<span class="c-err">✗ no such version</span>`);
+  }
+
+  // ── close: back to the program's working copy ─────────────────────────────
+  else if (verb === "close") {
+    if (boundVersion()) closeVersion();
+    else print(`<span class="c-muted">no version open</span>`);
+  }
+
+  // ── compiler: show / switch the active compiler ───────────────────────────
+  else if (verb === "compiler") {
+    const arg = parts[1];
+    if (!arg) {
+      print(`<span class="c-muted">active compiler: </span><span class="c-ok">${esc(compilerLabel(activeCompilerId))}</span>`);
+    } else {
+      const ver = (versions[currentProgName()] || []).find(v => v.n === Number(arg));
+      const id  = ver ? "boot:" + ver.id : arg;
+      if (allCompilerSources().some(s => s.id === id)) { await switchCompiler(id); return; }
+      print(`<span class="c-err">✗ unknown compiler "${esc(arg)}"</span>`);
+    }
+  }
+
   // ── compile ────────────────────────────────────────────────────────────────
   else if (verb === "compile") {
     if (editingEnvFile) {
@@ -1096,16 +1613,14 @@ async function runCommand(raw, isInternal = false) {
     print(`<span class="c-muted">compiling…</span>`);
 
     try {
-      // Compile on the main thread (same as before — just produces a binary)
       const libs   = await gatherLibs(code);
-      const binary = compile(code, libs);
+      const binary = await compile(code, libs);
       if (!binary) throw new Error("compile() returned null");
 
       lastBinary      = binary;
       lastMeta        = binary.meta || {};
-      lastFuncExports = null;   // invalidate until worker confirms
+      lastFuncExports = null;
 
-      // Show byte count + hex preview
       print(`<span class="c-ok">✓ ${binary.length} bytes</span>`);
       let hex = "";
       const lim = Math.min(binary.length, 48);
@@ -1115,13 +1630,12 @@ async function runCommand(raw, isInternal = false) {
         hex += `<span class="c-muted">… +${binary.length - 48}</span>`;
       print(`<span class="c-hex">${hex}</span>`);
 
-      // Parse env.js and hand binary + env config to the worker for WebAssembly.instantiate()
-      // We copy (not transfer) so lastBinary stays valid for `hex` and `wat` commands.
       const parsedEnvImports = parseEnvImports();
       const result = await workerSend({
         type:       "compile",
         binary:     binary,
         envImports: parsedEnvImports,
+        code:       code,
       });
 
       lastFuncExports = result.funcExports;
@@ -1191,21 +1705,29 @@ async function runCommand(raw, isInternal = false) {
     await runCommand(`run main ${testArgs.join(" ")}`, true);
   }
 
-  // ── hex: dump the last compiled binary ────────────────────────────────────
+  // ── hex: dump binary (last compiled, or specified version/compiler) ──────
   else if (verb === "hex") {
-    if (!lastBinary) { print(`<span class="c-warn">⚠ run compile first</span>`); return; }
+    const bin = getBinaryArg(parts[1]);
+    if (!bin) { 
+      print(`<span class="c-warn">⚠ no binary available (run compile first or specify a valid version/compiler id)</span>`); 
+      return; 
+    }
     let row = "";
-    for (let i = 0; i < lastBinary.length; i++)
-      row += lastBinary[i].toString(16).padStart(2, "0").toUpperCase() + " ";
+    for (let i = 0; i < bin.length; i++)
+      row += bin[i].toString(16).padStart(2, "0").toUpperCase() + " ";
     if (row) print(`<span class="c-hex">${row}</span>`);
   }
 
-  // ── wat: disassemble last compiled binary to WebAssembly Text Format ───────
+  // ── wat: disassemble binary (last compiled, or specified version/compiler) ─
   else if (verb === "wat") {
-    if (!lastBinary) { print(`<span class="c-warn">⚠ run compile first</span>`); return; }
+    const bin = getBinaryArg(parts[1]);
+    if (!bin) { 
+      print(`<span class="c-warn">⚠ no binary available (run compile first or specify a valid version/compiler id)</span>`); 
+      return; 
+    }
     try {
       const wabt   = await getWabt();
-      const module = wabt.readWasm(lastBinary, { readDebugNames: true });
+      const module = wabt.readWasm(bin, { readDebugNames: true });
       module.generateNames();
       module.applyNames();
       const text = module.toText({ foldExprs: false, inlineExport: true });
@@ -1326,3 +1848,46 @@ function updateMinimap() {
 
 window.addEventListener("resize", updateMinimap);
 setTimeout(updateMinimap, 50);
+
+// ─── Fullscreen Viewer ────────────────────────────────────────────────────────
+
+document.getElementById("viewerClose")?.addEventListener("click", () => {
+  document.getElementById("viewerModal").classList.add("hidden");
+});
+
+async function openFullscreenViewer(verId) {
+  const hit = findVersion(verId);
+  if (!hit) {
+    print(`<span class="c-err">✗ version not found for viewer</span>`);
+    return;
+  }
+  
+  const binary = fromB64(hit.ver.binary);
+  const source = hit.ver.code;
+  
+  // Format Hex (16 bytes per line)
+  let hex = "";
+  for (let i = 0; i < binary.length; i++) {
+    hex += binary[i].toString(16).padStart(2, "0").toUpperCase() + " ";
+    if ((i + 1) % 16 === 0) hex += "\n";
+  }
+  
+  // Show modal immediately while WAT builds
+  document.getElementById("viewerTitle").textContent = `${hit.prog} v${hit.ver.n} — Built by ${hit.ver.compiler.label} — ${binary.length} Bytes`;
+  document.getElementById("viewerSource").textContent = source;
+  document.getElementById("viewerHex").textContent = hex.trim();
+  document.getElementById("viewerWat").textContent = "Decompiling..."; 
+  document.getElementById("viewerModal").classList.remove("hidden");
+
+  try {
+    const wabt = await getWabt();
+    const module = wabt.readWasm(binary, { readDebugNames: true });
+    module.generateNames();
+    module.applyNames();
+    const wat = module.toText({ foldExprs: false, inlineExport: true });
+    module.destroy();
+    document.getElementById("viewerWat").textContent = wat;
+  } catch (err) {
+    document.getElementById("viewerWat").textContent = "Error generating WAT:\n" + err.message;
+  }
+}

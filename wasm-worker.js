@@ -15,12 +15,18 @@
 //      writes length into control[1], stores 1 into control[0],
 //      calls Atomics.notify(control, 0)
 //   4. Worker unblocks, reads dataBuf[0..dataLen-1]
+//
+// get_code flow
+//   The main thread sends the program's source with the "compile" message.
+//   env.get_code(addr) writes it (UTF-8, null-terminated) into WASM memory at
+//   addr and returns the byte length (without the terminator).
 
 "use strict";
 
 let controlBuf  = null;   // Int32Array view of controlSAB
 let dataBuf     = null;   // Uint8Array  view of dataSAB
 let lastInstance = null;
+let currentCode  = "";    // source code of the module being run (for get_code)
 
 // ─── stdout buffering ────────────────────────────────────────────────────────
 
@@ -80,6 +86,23 @@ function buildEnvObject(envImports) {
     return n;
   };
 
+  // Writes the full source code to memory at addr (null-terminated UTF-8)
+  // and returns the number of bytes written, not counting the terminator.
+  env.get_code = (addr) => {
+    addr >>>= 0;
+    const bytes = new TextEncoder().encode(currentCode);
+    const memory = lastInstance.exports.memory;
+    const need   = addr + bytes.length + 1;
+    if (need > memory.buffer.byteLength) {
+      // grow so a large source doesn't trap; throws RangeError if impossible
+      memory.grow(Math.ceil((need - memory.buffer.byteLength) / 65536));
+    }
+    const mem = new Uint8Array(memory.buffer);   // re-read after a possible grow
+    mem.set(bytes, addr);
+    mem[addr + bytes.length] = 0;                // null-terminate
+    return bytes.length;
+  };
+
   // ── user-defined imports ──────────────────────────────────────────────────
 
   for (const imp of envImports) {
@@ -111,6 +134,7 @@ self.onmessage = async ({ data: msg }) => {
     // ── compile: instantiate a new WASM module ──────────────────────────────
     case "compile": {
       lastInstance = null;
+      currentCode  = msg.code ?? "";
       try {
         const wasmMod  = await WebAssembly.compile(msg.binary);
         const env      = buildEnvObject(msg.envImports);
@@ -165,8 +189,8 @@ self.onmessage = async ({ data: msg }) => {
     // ── terminate: reset state (used when main thread recreates worker) ────
     case "reset":
       lastInstance = null;
+      currentCode  = "";
       outBuf       = "";
-      _charBuf     = [];    // eslint-disable-line no-undef
       break;
   }
 };

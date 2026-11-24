@@ -117,6 +117,70 @@
       </div>
     </div>
 
+    <!-- Source/Hex/WAT Fullscreen Viewer -->
+    <div id="viewerModal" class="viewer-modal hidden">
+      <div class="viewer-header">
+        <h2 id="viewerTitle">Version Viewer</h2>
+        <button id="viewerClose" class="viewer-close">✕ Close</button>
+      </div>
+      <div class="viewer-body">
+        <div class="viewer-pane">
+          <div class="viewer-pane-title">Source Code</div>
+          <pre id="viewerSource" class="viewer-code"></pre>
+        </div>
+        <div class="viewer-pane">
+          <div class="viewer-pane-title">Hex Dump</div>
+          <pre id="viewerHex" class="viewer-code"></pre>
+        </div>
+        <div class="viewer-pane">
+          <div class="viewer-pane-title">WebAssembly Text (WAT)</div>
+          <pre id="viewerWat" class="viewer-code"></pre>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .viewer-modal {
+        position: fixed; inset: 0; z-index: 9999;
+        background: var(--bg-dark, #1e1e1e);
+        display: flex; flex-direction: column;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .viewer-modal.hidden { display: none; }
+      .viewer-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 12px 20px; background: var(--bg, #252526);
+        border-bottom: 1px solid var(--border, #333);
+      }
+      .viewer-header h2 { margin: 0; font-size: 14px; color: var(--text, #eee); font-weight: 600; }
+      .viewer-close {
+        background: none; border: none; color: var(--text-muted, #888);
+        cursor: pointer; font-size: 13px; padding: 4px 8px;
+      }
+      .viewer-close:hover { color: var(--text, #eee); background: rgba(255,255,255,0.1); border-radius: 4px; }
+      .viewer-body {
+        display: flex; flex: 1; overflow: hidden;
+      }
+      .viewer-pane {
+        flex: 1; display: flex; flex-direction: column;
+        border-right: 1px solid var(--border, #333);
+      }
+      .viewer-pane:last-child {
+        border-right: none;
+      }
+      .viewer-pane-title {
+        padding: 8px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+        color: var(--text-muted, #888); background: var(--bg, #252526);
+        border-bottom: 1px solid var(--border-light, #333);
+      }
+      .viewer-code {
+        flex: 1; margin: 0; padding: 16px; overflow: auto;
+        font-family: Consolas, "Courier New", monospace; font-size: 13px;
+        color: var(--hex, #d4d4d4); background: var(--bg-dark, #1e1e1e);
+        white-space: pre;
+      }
+    </style>
+
     <script src="script.js" type="module"></script>
   </body>
 </html>

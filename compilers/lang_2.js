@@ -444,7 +444,7 @@ function compile_executables(code, functions, executables, imports) {
     let fullFunctionName;
     let stacktypes = [];
 
-    lines.forEach((line) => {
+    lines.forEach((line, idx) => {
         if (!line.trim()) return;
 
         const isDepth0Line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ");
@@ -468,7 +468,8 @@ function compile_executables(code, functions, executables, imports) {
                 depth++;
             } else if (line === '}') {
                 depth--;
-                if (depth === 0) {
+                const nextLine = lines.slice(idx + 1).find(l => l.trim().length > 0)?.trim();
+                if (nextLine !== "else") {
                     executables[functionIndex].binary.push(encodeWasmInstruction("end").opcode[0]);
                 }
             } else {
@@ -797,22 +798,26 @@ function encodeWasmInstruction(inst, stack = [], arg = null) {
             const valueType = stack[stack.length - 1]; 
             const bits = args[0] ? parseInt(args[0]) : null;
             
-            const align = encodeULEB128(parseInt(args[1] ?? (bits ? Math.log2(bits/8) : (valueType === "int64" || valueType === "float64" ? 3 : 2))));
+            // Map the numeric WebAssembly type ID back to its string name
+            const typeMap = { 127: "int32", 126: "int64", 125: "float32", 124: "float64" };
+            const valueTypeStr = typeMap[valueType] || valueType;
+            
+            const align = encodeULEB128(parseInt(args[1] ?? (bits ? Math.log2(bits/8) : (valueTypeStr === "int64" || valueTypeStr === "float64" ? 3 : 2))));
             const offset = encodeULEB128(parseInt(args[2] ?? 0));
             const memArgs = [...align, ...offset];
 
-            if (valueType === "int32") {
+            if (valueTypeStr === "int32") {
                 if (bits === 8)  return { opcode: [0x3a, ...memArgs], popCount: 2, pushType: null };
                 if (bits === 16) return { opcode: [0x3b, ...memArgs], popCount: 2, pushType: null };
                 if (!bits || bits === 32) return { opcode: [0x36, ...memArgs], popCount: 2, pushType: null };
-            } else if (valueType === "int64") {
+            } else if (valueTypeStr === "int64") {
                 if (bits === 8)  return { opcode: [0x3c, ...memArgs], popCount: 2, pushType: null };
                 if (bits === 16) return { opcode: [0x3d, ...memArgs], popCount: 2, pushType: null };
                 if (bits === 32) return { opcode: [0x3e, ...memArgs], popCount: 2, pushType: null };
                 if (!bits || bits === 64) return { opcode: [0x37, ...memArgs], popCount: 2, pushType: null };
-            } else if (valueType === "float32" && (!bits || bits === 32)) {
+            } else if (valueTypeStr === "float32" && (!bits || bits === 32)) {
                 return { opcode: [0x38, ...memArgs], popCount: 2, pushType: null };
-            } else if (valueType === "float64" && (!bits || bits === 64)) {
+            } else if (valueTypeStr === "float64" && (!bits || bits === 64)) {
                 return { opcode: [0x39, ...memArgs], popCount: 2, pushType: null };
             }
             throw new Error(`Invalid bit width ${bits} or type '${valueType}' for store`);
