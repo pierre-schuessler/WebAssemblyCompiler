@@ -439,7 +439,8 @@ function compile_executables(code, functions, executables, imports) {
 
     let serviceName;
     let functionIndex;
-    let depth = 0;
+    let blockStack = []; // Replaces `let depth = 0`
+    let pendingBlockType = null; // Tracks what the next '{' is opening
     const lines = code.split("\n");
     let fullFunctionName;
     let stacktypes = [];
@@ -448,8 +449,12 @@ function compile_executables(code, functions, executables, imports) {
         if (!line.trim()) return;
 
         const isDepth0Line = line.startsWith("@") || line.startsWith("internal ") || line.startsWith("endpoint ");
-        if (isDepth0Line && depth !== 0) throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line);
-        if (!isDepth0Line && depth === 0 && line !== '{' && line !== '}') throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line);
+        if (isDepth0Line && blockStack.length !== 0) {
+            throw new CompilationError("One function must be closed before beginning another.", "compile_executables", line);
+        }
+        if (!isDepth0Line && blockStack.length === 0 && line !== '{' && line !== '}' && !pendingBlockType) {
+            throw new CompilationError("The functions body must be enclosed in { }", "compile_executables", line);
+        }
 
         if (line.startsWith("@")) {
             serviceName = line.substring(1).trim();
@@ -460,77 +465,99 @@ function compile_executables(code, functions, executables, imports) {
             functionIndex    = parsedInfo.functionIndex;
             fullFunctionName = parsedInfo.key;
             stacktypes       = [];
+            pendingBlockType = "fn";
             
             executables[functionIndex] = { locals: parsedInfo.initialLocals, binary: [] };
 
-        } else {
-            if (line === '{') {
-                depth++;
-            } else if (line === '}') {
-                depth--;
-                const nextLine = lines.slice(idx + 1).find(l => l.trim().length > 0)?.trim();
-                if (nextLine !== "else") {
-                    executables[functionIndex].binary.push(encodeWasmInstruction("end").opcode[0]);
+        } else if (line === '{') {
+            blockStack.push(pendingBlockType || "block");
+            pendingBlockType = null;
+
+        } else if (line === '}') {
+            if (blockStack.length === 0) {
+                throw new CompilationError("Unexpected '}' with no matching '{'.", "compile_executables", line);
+            }
+
+            const closedBlock = blockStack.pop();
+            const nextLine = lines.slice(idx + 1).find(l => l.trim().length > 0)?.trim();
+
+            if (nextLine === "else") {
+                if (closedBlock !== "if") {
+                    throw new CompilationError("'else' can only follow an 'if' block.", "compile_executables", line);
                 }
+                pendingBlockType = "else"; // Keep function context alive across the gap
             } else {
-                const executable = executables[functionIndex];
-                const binary     = executable.binary;
-                const locals     = executable.locals;
+                executables[functionIndex].binary.push(encodeWasmInstruction("end").opcode[0]);
+            }
 
-                if (line.startsWith("create ")) {
-                    handleVariableCreation(line, executable, fullFunctionName);
-                } else {
-                    const trimmedLine = line.trim();
-                    const endsWithArrow = trimmedLine.endsWith("=>");
+        } else {
+            const executable = executables[functionIndex];
+            const binary     = executable.binary;
+            const locals     = executable.locals;
+
+            if (line.startsWith("create ")) {
+                handleVariableCreation(line, executable, fullFunctionName);
+            } else {
+                const trimmedLine = line.trim();
+                const endsWithArrow = trimmedLine.endsWith("=>");
+                
+                const computationalElements = trimmedLine.split("=>").map(el => el.trim());
+                if (endsWithArrow) computationalElements.pop();
+
+                for (let i = 0; i < computationalElements.length; i++) {
+                    const element = computationalElements[i];
+                    const isOutput = !endsWithArrow && (i === computationalElements.length - 1);
                     
-                    const computationalElements = trimmedLine.split("=>").map(el => el.trim());
-                    if (endsWithArrow) computationalElements.pop();
-
-                    for (let i = 0; i < computationalElements.length; i++) {
-                        const element = computationalElements[i];
-                        const isOutput = !endsWithArrow && (i === computationalElements.length - 1);
-                        
-                        const isConstantElement = /^\((\w+)\)/.test(element);
-                        const immMatch = /^([\w.]+)\(([^)]*)\)$/.exec(element);
-                        
-                        const isFunctionCall = !isConstantElement && (
-                            element.includes(".") || 
-                            executableNames.includes(element) || // FIX: check against safe names
-                            imports.some(imp => imp.name === element || `${imp.module}.${imp.name}` === element)
-                        );
-
-                        if (immMatch) {
-                            const instrName = immMatch[1];
-                            const rawArgs   = immMatch[2].trim();
-                            const immediates = rawArgs.length ? rawArgs.split(",").map(s => s.trim()) : [];
-                            handleImmediateInstruction(instrName, immediates, binary, stacktypes, locals, line);
-                        } else if (isFunctionCall) {
-                            handleFunctionCall(element, executableNames, functions, imports, binary, stacktypes, line);
-                        } else {
-                            element.split(",").map(v => v.trim()).forEach(token => {
-                                if (token) {
-                                    handleToken(token, isOutput, locals, binary, stacktypes, line);
-                                }
-                            });
-                        }
+                    // Track structured control flow keywords so the next '{' knows its type
+                    if (element === "if" || element === "block" || element === "loop") {
+                        pendingBlockType = element;
                     }
 
-                    const lastElement = computationalElements[computationalElements.length - 1];
-                    const lastToken = lastElement ? lastElement.split(",").pop().trim() : "";
-                    const isReturn = (lastToken === "return");
+                    const isConstantElement = /^\((\w+)\)/.test(element);
+                    const immMatch = /^([\w.]+)\(([^)]*)\)$/.exec(element);
+                    
+                    const isFunctionCall = !isConstantElement && (
+                        element.includes(".") || 
+                        executableNames.includes(element) ||
+                        imports.some(imp => imp.name === element || `${imp.module}.${imp.name}` === element)
+                    );
 
-                    if (!endsWithArrow && !isReturn && stacktypes.length > 0) {
-                        throw new CompilationError(
-                            "Unconsumed items left on the stack. Append '=>' to the end of the line if you intend to carry them forward.",
-                            "compile_executables", 
-                            line
-                        );
+                    if (immMatch) {
+                        const instrName = immMatch[1];
+                        const rawArgs   = immMatch[2].trim();
+                        const immediates = rawArgs.length ? rawArgs.split(",").map(s => s.trim()) : [];
+                        handleImmediateInstruction(instrName, immediates, binary, stacktypes, locals, line);
+                    } else if (isFunctionCall) {
+                        handleFunctionCall(element, executableNames, functions, imports, binary, stacktypes, line);
+                    } else {
+                        element.split(",").map(v => v.trim()).forEach(token => {
+                            if (token) {
+                                handleToken(token, isOutput, locals, binary, stacktypes, line);
+                            }
+                        });
                     }
+                }
+
+                const lastElement = computationalElements[computationalElements.length - 1];
+                const lastToken = lastElement ? lastElement.split(",").pop().trim() : "";
+                const isReturn = (lastToken === "return");
+
+                if (!endsWithArrow && !isReturn && stacktypes.length > 0) {
+                    throw new CompilationError(
+                        "Unconsumed items left on the stack. Append '=>' to the end of the line if you intend to carry them forward.",
+                        "compile_executables", 
+                        line
+                    );
                 }
             }
         }
     });
+
+    if (blockStack.length !== 0) {
+        throw new CompilationError("Unclosed '{' at end of file.", "compile_executables");
+    }
 }
+
 /*
 FormatBinary arguments
 functions:   Array of function signatures defined in this module.
